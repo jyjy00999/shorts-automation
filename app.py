@@ -193,10 +193,19 @@ def get_secret(key: str, default: str = "") -> str:
 
 
 # ── 비밀번호 잠금 (설정했을 때만 작동) ─────────────
+def _login_token(pw: str) -> str:
+    """비밀번호로 로그인 토큰을 만듭니다 (비밀번호 자체는 주소에 안 남깁니다)."""
+    import hashlib
+    return hashlib.sha256(f"shorts-app::{pw}".encode()).hexdigest()[:32]
+
+
 def check_password() -> bool:
     """
     APP_PASSWORD가 설정돼 있으면 로그인 화면을 띄웁니다.
     없으면 그냥 통과 — 내 PC에서 혼자 쓸 때는 귀찮지 않게 합니다.
+
+    '로그인 유지'를 켜면 주소에 토큰이 붙습니다. 그 상태로 휴대폰
+    홈 화면에 추가하면 다음부터 비밀번호를 묻지 않습니다.
     """
     # 앞뒤 공백은 떼어냅니다 — Secrets나 환경변수에 실수로 섞여 들어가면
     # 맞는 비밀번호를 넣어도 계속 틀렸다고 나옵니다.
@@ -205,6 +214,16 @@ def check_password() -> bool:
         return True
     if st.session_state.get("_authed"):
         return True
+
+    token = _login_token(pw)
+
+    # 주소에 토큰이 들어 있으면 통과 (홈 화면 바로가기용)
+    try:
+        if st.query_params.get("t") == token:
+            st.session_state["_authed"] = True
+            return True
+    except Exception:
+        pass
 
     st.markdown("""
     <div class="hero-title">
@@ -217,12 +236,26 @@ def check_password() -> bool:
     with c:
         entered = st.text_input("비밀번호", type="password", label_visibility="collapsed",
                                 placeholder="비밀번호")
+        keep = st.checkbox("로그인 유지 (휴대폰에서 편합니다)", value=True)
+
         if st.button("들어가기", use_container_width=True, type="primary"):
             if entered.strip() == pw:
                 st.session_state["_authed"] = True
+                if keep:
+                    # 주소에 토큰을 남겨 다음 접속 때 바로 들어가게 합니다
+                    try:
+                        st.query_params["t"] = token
+                    except Exception:
+                        pass
                 st.rerun()
             else:
                 st.error("비밀번호가 다릅니다.")
+
+        st.caption(
+            "💡 '로그인 유지'를 켜고 들어간 뒤 **홈 화면에 추가**하면 "
+            "다음부터 비밀번호 없이 열립니다. "
+            "다만 그 주소를 남에게 보내면 비밀번호 없이 들어올 수 있으니 주의하세요."
+        )
     return False
 
 
@@ -458,6 +491,16 @@ with st.sidebar:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
+
+    # 비밀번호를 쓰는 경우에만 로그아웃을 보여줍니다
+    if get_secret("APP_PASSWORD", "").strip():
+        if st.button("🔒 로그아웃", use_container_width=True):
+            st.session_state["_authed"] = False
+            try:
+                st.query_params.clear()   # 주소에 남은 토큰도 지웁니다
+            except Exception:
+                pass
+            st.rerun()
 
 
 # ══════════════════════════════════════════════════
