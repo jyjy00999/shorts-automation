@@ -1,0 +1,25 @@
+# ⚠️ API 키 — 절대 올리지 않습니다
+.env
+
+# 결과물·소재 (용량이 크고 개인 자료입니다)
+outputs/
+assets/
+
+# 파이썬
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# 자동 생성 목록 (클라우드에서는 다시 만듭니다)
+assets/voices_ko.json
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Claude Code 작업 파일
+.claude/
+.agents/

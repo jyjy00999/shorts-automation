@@ -1,0 +1,25 @@
+# 쇼핑 쇼츠 자동화 — 의존성
+#
+# ⚠️ torch / easyocr 은 여기 없습니다.
+#    자막 위치 자동 검출(OCR)에만 쓰이는데 메모리를 1GB 넘게 먹어서
+#    Streamlit Cloud 무료 티어(최대 2.7GB)에 올리면 앱이 죽습니다.
+#    그 기능은 PC에서만 씁니다. 없으면 앱이 알아서 건너뜁니다.
+#
+#    PC에서 OCR까지 쓰시려면:
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#      pip install easyocr
+
+streamlit>=1.35.0
+anthropic>=0.28.0          # Claude API (이미지 분석 + 대본 생성)
+youtube-transcript-api>=0.6.2
+yt-dlp>=2024.5.1           # 영상 메타데이터 추출
+Pillow>=10.3.0
+pydub>=0.25.1              # MP3/WAV 조작
+mutagen>=1.47.0            # 오디오 길이 계산
+moviepy>=1.0.3
+requests>=2.31.0
+httpx>=0.27.0
+python-dotenv>=1.0.1
+tqdm>=4.66.0
+loguru>=0.7.2
+numpy>=1.26.0
