@@ -133,8 +133,27 @@ def _gemini_call(
     return raw_text, usage
 
 
+def normalize_keys(api_key) -> list:
+    """키 하나(str) 또는 여러 개(list)를 정리된 리스트로 만듭니다.
+
+    빈 값과 중복을 걸러내고, 넣은 순서는 그대로 지킵니다.
+    """
+    if isinstance(api_key, str):
+        raw = [api_key]
+    else:
+        raw = list(api_key or [])
+
+    seen, out = set(), []
+    for k in raw:
+        k = (k or "").strip()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def gemini_generate(
-    api_key: str,
+    api_key,                      # str 또는 list[str] (여러 개면 순서대로 돌려씁니다)
     prompt: str,
     system: str = "",
     images: Optional[list] = None,
@@ -143,15 +162,21 @@ def gemini_generate(
     temperature: float = 0.9,
 ) -> tuple:
     """
-    Gemini 호출 (모델을 순서대로 시도).
+    Gemini 호출.
+
+    모델 × 키를 순서대로 시도합니다.
+    같은 모델에서 키 1번이 하루 한도(429)에 걸리면 키 2번, 3번… 으로 넘어가고,
+    모든 키가 막히면 그 다음 모델로 내려갑니다.
 
     Args:
+        api_key: API 키 하나 또는 여러 개
         images: [(base64_string, 'image/jpeg'), ...] 형태의 리스트
 
     Returns:
-        (raw_text, usage_dict)
+        (raw_text, usage_dict)  — usage_dict['key_index'] 에 몇 번째 키를 썼는지 담깁니다
     """
-    if not api_key:
+    keys = normalize_keys(api_key)
+    if not keys:
         raise ProviderError(
             "Gemini API 키가 없습니다.\n"
             "→ aistudio.google.com/apikey 에서 무료로 발급받아 사이드바에 넣어 주세요."
@@ -160,34 +185,59 @@ def gemini_generate(
     chain = ([model] if model else []) + [m for m in GEMINI_FALLBACK_CHAIN if m != model]
 
     last_err = None
+    bad_keys = set()        # 키 자체가 틀린 경우 (다음 모델에서 또 시도하지 않게)
+    exhausted = set()       # 하루 한도를 다 쓴 키
+
     for m in chain:
-        try:
-            logger.info(f"Gemini 호출: {m} (이미지 {len(images or [])}장)")
-            return _gemini_call(
-                api_key=api_key, model=m, prompt=prompt, system=system,
-                images=images, max_tokens=max_tokens, temperature=temperature,
-            )
-        except ProviderError as e:
-            msg = str(e)
-            last_err = e
-
-            if "[400]" in msg and "API key not valid" in msg:
-                raise ProviderError(
-                    "❌ Gemini API 키가 올바르지 않습니다.\n"
-                    "→ aistudio.google.com/apikey 에서 다시 확인해 주세요."
-                )
-            # 한도 초과 / 없는 모델 / 권한 없음 → 다음 모델로
-            if any(c in msg for c in ("[429]", "[404]", "[403]", "[503]")):
-                logger.warning(f"{m} 사용 불가 → 다음 모델 시도: {msg[:120]}")
+        for idx, key in enumerate(keys):
+            if idx in bad_keys or idx in exhausted:
                 continue
-            # 그 외 오류도 일단 다음 모델로 넘겨 봅니다
-            logger.warning(f"{m} 실패 → 다음 모델 시도: {msg[:120]}")
-            continue
+            try:
+                logger.info(
+                    f"Gemini 호출: {m} / 키 {idx+1}번 (이미지 {len(images or [])}장)"
+                )
+                raw_text, usage = _gemini_call(
+                    api_key=key, model=m, prompt=prompt, system=system,
+                    images=images, max_tokens=max_tokens, temperature=temperature,
+                )
+                usage["key_index"] = idx
+                return raw_text, usage
 
+            except ProviderError as e:
+                msg = str(e)
+                last_err = e
+
+                if "API key not valid" in msg or "[401]" in msg:
+                    logger.warning(f"키 {idx+1}번이 올바르지 않습니다 → 건너뜁니다")
+                    bad_keys.add(idx)
+                    continue
+                if "[429]" in msg:
+                    logger.warning(f"키 {idx+1}번 한도 초과 → 다음 키")
+                    exhausted.add(idx)
+                    continue
+                if any(c in msg for c in ("[404]", "[403]")):
+                    # 이 모델을 못 쓰는 것뿐이니 키는 살려 두고 다음 모델로
+                    logger.warning(f"{m} 사용 불가 → 다음 모델: {msg[:100]}")
+                    break
+                logger.warning(f"{m}/키 {idx+1}번 실패 → 계속: {msg[:100]}")
+                continue
+
+    # ── 전부 실패 ────────────────────────────────
+    if len(bad_keys) == len(keys):
+        raise ProviderError(
+            "❌ 넣으신 Gemini 키가 모두 올바르지 않습니다.\n"
+            "→ aistudio.google.com/apikey 에서 다시 확인해 주세요."
+        )
+    if exhausted:
+        raise ProviderError(
+            f"❌ Gemini 무료 하루 한도를 다 썼습니다 (키 {len(exhausted)}개 모두 소진).\n\n"
+            "• 사이드바에 키를 더 추가하면 그만큼 더 쓸 수 있습니다\n"
+            "  (구글 계정이나 프로젝트가 다르면 한도도 따로 잡힙니다)\n"
+            "• 또는 내일 다시 쓰거나, Claude(유료)로 바꿔 주세요"
+        )
     raise ProviderError(
         "❌ Gemini 호출에 모두 실패했습니다.\n"
-        f"마지막 오류: {last_err}\n\n"
-        "무료 하루 한도를 다 썼을 수 있습니다. 내일 다시 쓰거나 Claude로 바꿔 보세요."
+        f"마지막 오류: {last_err}"
     )
 
 

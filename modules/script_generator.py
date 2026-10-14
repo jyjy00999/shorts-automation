@@ -152,7 +152,7 @@ def generate_scripts(
     additional_info: str = "",
     model: str = "claude-sonnet-5",
     provider: str = "",        # "gemini"(무료) 또는 "claude"(유료)
-    gemini_key: str = "",
+    gemini_key = "",   # 키 하나(str) 또는 여러 개(list)
 ) -> dict:
     """
     AI를 호출하여 쇼핑 쇼츠 대본 3가지 버전을 생성합니다.

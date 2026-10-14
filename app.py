@@ -368,45 +368,71 @@ with st.sidebar:
     if ai_provider != _saved_provider:
         save_env("AI_PROVIDER", ai_provider)
 
-    if ai_provider == "gemini":
-        gemini_key = st.text_input(
-            "🆓 Google Gemini API 키",
-            value=clean_env(get_secret("GEMINI_API_KEY", "")),
-            type="password",
-            help="https://aistudio.google.com/apikey 에서 무료 발급 (카드 등록 없음)",
-            placeholder="AIza...",
-            key="input_gemini_key",
-        )
-        if gemini_key and gemini_key != clean_env(get_secret("GEMINI_API_KEY", "")):
-            save_env("GEMINI_API_KEY", gemini_key)
-            st.success("✅ Gemini 키 저장됨", icon="💾")
+    # ── Gemini 키 (여러 개 넣어두고 돌려씁니다) ──────
+    # 무료 한도는 키마다 따로 잡히기 때문에, 하나가 떨어지면
+    # 다음 키로 자동으로 넘어갑니다.
+    GEMINI_SLOTS = 4
+    GEMINI_ENV_KEYS = ["GEMINI_API_KEY"] + [
+        f"GEMINI_API_KEY_{i}" for i in range(2, GEMINI_SLOTS + 1)
+    ]
 
-        if not gemini_key:
-            st.info(
-                "👉 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 에서\n"
-                "구글 로그인 → **Create API key** → 복사해서 위에 붙여넣기\n\n"
-                "카드 등록 없이 무료입니다."
-            )
-        else:
-            st.caption("💰 비용: **0원** (무료 할당량 사용)")
-        anthropic_key = clean_env(get_secret("ANTHROPIC_API_KEY", ""))
-    else:
-        gemini_key = clean_env(get_secret("GEMINI_API_KEY", ""))
-        # Anthropic API 키
-        anthropic_key = st.text_input(
-            "🤖 Anthropic API 키",
-            value=clean_env(get_secret("ANTHROPIC_API_KEY", "")),
-            type="password",
-            help="https://console.anthropic.com 에서 발급",
-            placeholder="sk-ant-...",
-            key="input_anthropic_key",
+    gemini_keys = []
+    with st.expander(
+        "🆓 Gemini 키 (여러 개 가능)",
+        expanded=(ai_provider == "gemini" and not clean_env(get_secret("GEMINI_API_KEY", ""))),
+    ):
+        st.caption(
+            "키를 여러 개 넣으면 하나가 하루 한도에 걸렸을 때 **자동으로 다음 키**를 씁니다. "
+            "구글 계정이나 프로젝트가 다르면 한도도 따로 잡힙니다."
         )
-        if anthropic_key and anthropic_key != clean_env(get_secret("ANTHROPIC_API_KEY", "")):
-            save_env("ANTHROPIC_API_KEY", anthropic_key)
-            st.success("✅ API 키 저장됨", icon="💾")
+        for _slot, _env in enumerate(GEMINI_ENV_KEYS, start=1):
+            _saved = clean_env(get_secret(_env, ""))
+            _val = st.text_input(
+                f"키 {_slot}번" + (" (기본)" if _slot == 1 else ""),
+                value=_saved,
+                type="password",
+                placeholder="AIza...",
+                key=f"input_gemini_key_{_slot}",
+            )
+            if _val != _saved:
+                save_env(_env, _val)
+                if _val:
+                    st.success(f"✅ 키 {_slot}번 저장됨", icon="💾")
+            if _val:
+                gemini_keys.append(_val)
+
+        st.markdown(
+            "👉 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 에서 "
+            "구글 로그인 → **Create API key** → 복사해서 붙여넣기 "
+            "(카드 등록 없이 무료)"
+        )
+
+    # 첫 번째 키 = 대표 키 (한 개만 받는 자리에 씁니다)
+    gemini_key = gemini_keys[0] if gemini_keys else ""
+
+    if ai_provider == "gemini":
+        if gemini_keys:
+            st.caption(f"💰 비용: **0원** · 키 {len(gemini_keys)}개 사용 중")
+        else:
+            st.warning("⚠️ 위 **🆓 Gemini 키** 칸에 키를 하나 이상 넣어 주세요")
+
+    # ── Anthropic 키 ──────────────────────────────
+    # Gemini를 쓰더라도 ⑤의 '똑똑한 장면 매칭'은 Claude가 필요해서
+    # 칸은 항상 보여 줍니다.
+    anthropic_key = st.text_input(
+        "🤖 Anthropic API 키" + ("  (선택 — 장면 매칭용)" if ai_provider == "gemini" else ""),
+        value=clean_env(get_secret("ANTHROPIC_API_KEY", "")),
+        type="password",
+        help="https://console.anthropic.com 에서 발급",
+        placeholder="sk-ant-...",
+        key="input_anthropic_key",
+    )
+    if anthropic_key and anthropic_key != clean_env(get_secret("ANTHROPIC_API_KEY", "")):
+        save_env("ANTHROPIC_API_KEY", anthropic_key)
+        st.success("✅ API 키 저장됨", icon="💾")
 
     # 아래 코드들이 'AI 키가 있나?' 를 하나로 확인할 수 있게 합쳐 둡니다
-    ai_key_ok = bool(gemini_key) if ai_provider == "gemini" else bool(anthropic_key)
+    ai_key_ok = bool(gemini_keys) if ai_provider == "gemini" else bool(anthropic_key)
 
     # Typecast API 설정
     st.markdown("---")
@@ -831,7 +857,7 @@ if _active == 0:
                             api_key=anthropic_key,
                             target_audience=target_audience,
                             provider=ai_provider,
-                            gemini_key=gemini_key,
+                            gemini_key=gemini_keys,
                         )
                         st.session_state['image_analysis'] = img_result
                         img_analysis = img_result.get('analysis', {})
@@ -850,7 +876,7 @@ if _active == 0:
                             api_key=anthropic_key,
                             additional_info=additional_info,
                             provider=ai_provider,
-                            gemini_key=gemini_key,
+                            gemini_key=gemini_keys,
                         )
                         st.session_state['scripts_data'] = script_result
                         st.success("✅ 대본 생성 완료!")
@@ -1003,7 +1029,7 @@ if _active == 2:
             col_center = st.columns([1, 2, 1])[1]
             with col_center:
                 if st.button("✨ 대본 3가지 버전 생성", use_container_width=True, type="primary"):
-                    if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
+                    if regenerate_scripts(anthropic_key, ai_provider, gemini_keys):
                         st.session_state['step'] = 4
                         st.session_state['active_tab'] = 2
                         st.rerun()
@@ -1056,7 +1082,7 @@ if _active == 2:
                                     use_container_width=True,
                                     help="지금 올린 영상·이미지를 다시 보고 대본을 새로 만듭니다",
                                 ):
-                                    if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
+                                    if regenerate_scripts(anthropic_key, ai_provider, gemini_keys):
                                         st.success("✅ 올린 소재에 맞는 대본으로 새로 만들었습니다!")
                                         st.rerun()
 
@@ -1097,7 +1123,7 @@ if _active == 2:
                         use_container_width=True,
                         help="올린 영상·이미지 그대로, 대본만 새로 만듭니다",
                     ):
-                        if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
+                        if regenerate_scripts(anthropic_key, ai_provider, gemini_keys):
                             st.rerun()
                 with col_r2:
                     if st.button(
@@ -1107,7 +1133,7 @@ if _active == 2:
                     ):
                         st.session_state.pop('image_analysis', None)
                         st.session_state.pop('scripts_data', None)
-                        if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
+                        if regenerate_scripts(anthropic_key, ai_provider, gemini_keys):
                             st.rerun()
 
             else:

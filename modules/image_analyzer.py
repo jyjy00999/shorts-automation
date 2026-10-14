@@ -74,7 +74,7 @@ def analyze_product_images(
     target_audience: str = "일반 소비자",
     model: str = "claude-sonnet-5",  # 최신 Claude 모델
     provider: str = "",              # "gemini"(무료) 또는 "claude"(유료)
-    gemini_key: str = "",
+    gemini_key = "",   # 키 하나(str) 또는 여러 개(list)
 ) -> dict:
     """
     상품 이미지들을 AI Vision으로 분석하여 마케팅 인사이트를 추출합니다.
