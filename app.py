@@ -848,6 +848,79 @@ if _active == 1:
 # ══════════════════════════════════════════════════
 # 탭 ③: 대본 생성
 # ══════════════════════════════════════════════════
+
+def regenerate_scripts(api_key: str) -> bool:
+    """지금 올라와 있는 영상·이미지를 다시 보고 대본을 새로 만듭니다.
+
+    이미지 분석 결과가 없거나(= 샘플 대본만 떠 있는 상태) 비어 있으면
+    업로드한 이미지 / 영상에서 뽑은 화면을 먼저 다시 분석한 뒤 대본을 만듭니다.
+    """
+    if not api_key:
+        st.error("❌ Anthropic API 키를 먼저 입력하세요 (사이드바)")
+        return False
+
+    img_analysis = {}
+    if st.session_state.get('image_analysis'):
+        img_analysis = st.session_state['image_analysis'].get('analysis', {})
+
+    # 분석 결과가 없으면 → 지금 가지고 있는 소재로 다시 분석합니다
+    if not img_analysis:
+        img_paths = [p for p in st.session_state.get('uploaded_images', []) if os.path.exists(p)]
+
+        # 업로드 이미지가 없으면 소재 영상에서 화면을 뽑아 씁니다
+        if not img_paths:
+            _vids = [p for p in st.session_state.get('source_videos', []) if os.path.exists(p)]
+            if _vids:
+                with st.spinner("🎞️ 영상에서 상품 화면 추출 중..."):
+                    try:
+                        from modules.clip_editor import extract_frames_from_videos
+                        img_paths = extract_frames_from_videos(_vids, per_video=3, max_total=9)
+                        st.session_state['uploaded_images'] = img_paths
+                        st.session_state['images_from_video'] = True
+                    except Exception as e:
+                        st.warning(f"⚠️ 프레임 추출 실패: {e}")
+
+        if not img_paths:
+            st.error("❌ 분석할 이미지나 영상이 없습니다. '① 입력' 탭에서 소재를 올려 주세요.")
+            return False
+
+        with st.spinner("🖼️ 올린 영상·이미지 다시 분석 중..."):
+            try:
+                img_result = analyze_product_images(
+                    images=img_paths,
+                    api_key=api_key,
+                    target_audience=st.session_state.get('target_audience', '일반 소비자'),
+                )
+                st.session_state['image_analysis'] = img_result
+                img_analysis = img_result.get('analysis', {})
+            except Exception as e:
+                st.error(f"❌ 이미지 분석 오류: {e}")
+                return False
+
+    with st.spinner("✍️ 영상·이미지에 맞는 대본 새로 작성 중..."):
+        try:
+            result = generate_scripts(
+                image_analysis=img_analysis,
+                video_analysis=st.session_state.get('video_analysis', {}),
+                target_audience=st.session_state.get('target_audience', '일반 소비자'),
+                api_key=api_key,
+                additional_info=st.session_state.get('additional_info', ''),
+            )
+            st.session_state['scripts_data'] = result
+            st.session_state['selected_script'] = ''   # 이전 선택 해제
+            return True
+        except Exception as e:
+            err_msg = str(e)
+            if "크레딧 부족" in err_msg or "billing" in err_msg.lower() or "credit" in err_msg.lower():
+                st.error(
+                    "💳 **Anthropic 크레딧이 부족해서 대본을 만들지 못했습니다.**\n\n"
+                    "console.anthropic.com/settings/billing 에서 충전한 뒤 다시 눌러 주세요."
+                )
+            else:
+                st.error(f"❌ 대본 생성 오류: {e}")
+            return False
+
+
 if _active == 2:
     st.markdown("### ✍️ Step 3 — 쇼핑 쇼츠 대본 생성")
 
@@ -900,8 +973,16 @@ if _active == 2:
                 scripts = scripts_data['scripts_data']['scripts']
                 recommended = scripts_data['scripts_data'].get('recommended_version', 'A')
 
-                st.success(f"✅ {len(scripts)}개 대본 버전 생성 완료! 추천: 버전 {recommended}")
-                st.caption(scripts_data['scripts_data'].get('recommendation_reason', ''))
+                if scripts_data.get('is_sample'):
+                    st.error(
+                        "⚠️ **지금 보이는 대본은 '스마트 창문 청소 로봇' 샘플입니다.** "
+                        "올리신 영상·이미지와 아무 상관이 없습니다.\n\n"
+                        "AI 대본 생성이 실패해서(대부분 Anthropic 크레딧 부족) 임시 샘플이 들어간 상태예요. "
+                        "아래 **🔄 대본 재생성** 을 누르면 올린 소재를 다시 보고 대본을 새로 만듭니다."
+                    )
+                else:
+                    st.success(f"✅ {len(scripts)}개 대본 버전 생성 완료! 추천: 버전 {recommended}")
+                    st.caption(scripts_data['scripts_data'].get('recommendation_reason', ''))
 
                 version_tabs = st.tabs([
                     f"버전 {s.get('version', i+1)}" + (" ⭐" if s.get('version') == recommended else "")
@@ -920,7 +1001,22 @@ if _active == 2:
                             st.markdown("---")
 
                             full_script = script.get('full_script', '')
-                            st.markdown("**📜 전체 대본:**")
+
+                            # 「전체 대본」 글씨 옆에 재생성 버튼
+                            c_lbl, c_btn = st.columns([2, 1])
+                            with c_lbl:
+                                st.markdown("**📜 전체 대본:**")
+                            with c_btn:
+                                if st.button(
+                                    "🔄 대본 재생성",
+                                    key=f"regen_v{i}",
+                                    use_container_width=True,
+                                    help="지금 올린 영상·이미지를 다시 보고 대본을 새로 만듭니다",
+                                ):
+                                    if regenerate_scripts(anthropic_key):
+                                        st.success("✅ 올린 소재에 맞는 대본으로 새로 만들었습니다!")
+                                        st.rerun()
+
                             st.markdown(f'<div class="script-box">{full_script}</div>', unsafe_allow_html=True)
 
                         with col2:
@@ -951,9 +1047,25 @@ if _active == 2:
                             st.rerun()
 
                 st.markdown("---")
-                if st.button("🔄 대본 다시 생성"):
-                    del st.session_state['scripts_data']
-                    st.rerun()
+                col_r1, col_r2 = st.columns(2)
+                with col_r1:
+                    if st.button(
+                        "🔄 대본 재생성 (같은 소재)",
+                        use_container_width=True,
+                        help="올린 영상·이미지 그대로, 대본만 새로 만듭니다",
+                    ):
+                        if regenerate_scripts(anthropic_key):
+                            st.rerun()
+                with col_r2:
+                    if st.button(
+                        "🔁 소재부터 다시 분석",
+                        use_container_width=True,
+                        help="영상·이미지 분석 결과까지 지우고 처음부터 다시 봅니다",
+                    ):
+                        st.session_state.pop('image_analysis', None)
+                        st.session_state.pop('scripts_data', None)
+                        if regenerate_scripts(anthropic_key):
+                            st.rerun()
 
             else:
                 # JSON 파싱 실패 시 원본 표시

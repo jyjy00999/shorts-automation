@@ -265,6 +265,7 @@ def generate_test_scripts(target_audience: str = "일반 소비자") -> dict:
 
     return {
         "success": True,
+        "is_sample": True,   # ⚠️ 실제 상품과 무관한 샘플입니다 (앱에서 경고 표시용)
         "scripts_data": {
             "scripts": [
                 _mk(
