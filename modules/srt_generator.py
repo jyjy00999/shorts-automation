@@ -7,6 +7,10 @@
 
 import re
 import math
+
+# 띄어쓰기로 직접 줄을 나눌 때 허용하는 최대 줄 수
+# (쇼츠 세로 화면에서 4줄을 넘으면 화면을 가립니다)
+MAX_FORCED_LINES = 4
 from pathlib import Path
 from loguru import logger
 
@@ -69,6 +73,10 @@ def split_script_into_lines(
             내용이 한 자막에 섞이지 않습니다.
             (한 줄이 너무 길면 그 줄 안에서만 문장 단위로 더 나눕니다)
 
+    자막 한 장면 안에서 줄을 어디서 바꿀지 직접 정하고 싶으면
+    **띄어쓰기를 2칸 이상** 넣으세요. 그 자리에서 줄이 바뀝니다.
+    그냥 두면 한 줄 글자 수에 맞춰 어절(띄어쓰기) 단위로 자동 줄바꿈합니다.
+
     Returns:
         자막 블록 리스트 (각 블록이 하나의 SRT 항목이 됨)
     """
@@ -106,6 +114,19 @@ def split_script_into_lines(
             lines.append(cur)
         return lines
 
+    def wrap_segment(text: str) -> list[str]:
+        """띄어쓰기 2칸 이상은 '여기서 줄 바꿔라'는 뜻으로 받아들입니다.
+
+        그 지점에서 먼저 끊고, 각 조각은 글자 수에 맞춰 어절 단위로
+        다시 접습니다. (단어가 중간에서 쪼개지는 일은 없습니다)
+        """
+        lines = []
+        for chunk in re.split(r'[ \t　]{2,}', text):
+            chunk = chunk.strip()
+            if chunk:
+                lines.extend(wrap_words(chunk))
+        return lines
+
     # ── 1) 큰 덩어리 나누기 ──────────────────────
     # 줄바꿈을 지키면 '대본 한 줄'이 곧 한 덩어리가 됩니다.
     if respect_line_breaks:
@@ -120,10 +141,17 @@ def split_script_into_lines(
     # ── 2) 덩어리마다 자막 블록 만들기 ────────────
     blocks = []
     for seg in segments:
-        wrapped = wrap_words(seg)
+        wrapped = wrap_segment(seg)
+
+        # 띄어쓰기 2칸 이상으로 직접 줄을 나눠 놓았다면 그 뜻을 존중합니다.
+        # ('최대 줄 수'는 자동 줄바꿈에만 적용되는 한도입니다)
+        forced = len([c for c in re.split(r'[ \t　]{2,}', seg) if c.strip()])
+        limit = max_lines_per_block
+        if forced > 1:
+            limit = max(max_lines_per_block, min(forced, MAX_FORCED_LINES))
 
         # 한 장면에 들어갈 만큼 짧으면 → 그대로 한 블록
-        if len(wrapped) <= max_lines_per_block:
+        if len(wrapped) <= limit:
             blocks.append("\n".join(wrapped))
             continue
 
@@ -138,7 +166,7 @@ def split_script_into_lines(
 
         cur_lines = []
         for sentence in sentences:
-            s_lines = wrap_words(sentence)
+            s_lines = wrap_segment(sentence)
             # 넣으면 넘칠 때는 지금까지 모은 걸 먼저 내보냅니다
             if cur_lines and len(cur_lines) + len(s_lines) > max_lines_per_block:
                 blocks.append("\n".join(cur_lines))

@@ -127,6 +127,16 @@ def get_subtitle_style() -> dict:
     return dict(_style)
 
 
+def max_chars_for_font(font_size: int) -> int:
+    """이 글씨 크기로 9:16 화면 한 줄에 들어가는 한글 글자 수.
+
+    실제로 1080×1920 에 렌더링해서 재 본 값입니다.
+      크기 12 → 17자 / 16 → 12자 / 20 → 10자 / 26 → 8자 / 30 → 7자
+    이 수치를 넘기면 글자가 화면 밖으로 잘려 나갑니다.
+    """
+    return max(4, int(207 / max(int(font_size), 1)))
+
+
 def pct_to_margin(pct: float) -> int:
     """'아래에서 N%' 를 libass MarginV 값으로 바꿉니다."""
     return max(0, min(PLAY_RES_Y - 10, int(round(pct / 100.0 * PLAY_RES_Y))))
@@ -168,7 +178,10 @@ def subtitle_filter(
         f'FontName={font_name},FontSize={font_size},'
         'PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,'
         f'Outline={outline},Shadow=1,Bold=1,Alignment=2,'
-        f'MarginV={margin_v},Spacing=0.5'
+        f'MarginV={margin_v},Spacing=0.5,'
+        # WrapStyle=2 : libass 가 멋대로 줄을 더 쪼개지 않습니다.
+        # 우리가 넣은 줄바꿈이 그대로 최종 결과가 됩니다.
+        'WrapStyle=2'
     )
     if extra_style:
         style += ',' + extra_style

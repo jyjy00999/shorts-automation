@@ -1297,7 +1297,11 @@ if _active == 3:
             )
 
             _n_lines = len([l for l in (edited_script or "").splitlines() if l.strip()])
-            st.caption(f"📐 지금 **{_n_lines}줄** → 자막 장면이 그만큼 만들어집니다")
+            st.caption(
+                f"📐 지금 **{_n_lines}줄** → 자막 장면이 그만큼 만들어집니다  \n"
+                "✂️ 한 장면 안에서 줄을 바꾸고 싶으면 그 자리에 "
+                "**띄어쓰기를 2칸 이상** 넣으세요"
+            )
 
         with col2:
             st.markdown("#### 🎙️ 음성 설정")
@@ -1327,23 +1331,30 @@ if _active == 3:
                      "서로 다른 줄의 내용이 한 자막에 섞이지 않습니다.",
             )
 
+            sub_font_size = st.slider(
+                "자막 글씨 크기",
+                min_value=12, max_value=32,
+                value=18, key='sub_font_size',
+                help="쇼츠는 16~22 정도가 잘 보입니다",
+            )
+
+            # 이 크기로 한 줄에 몇 자까지 들어가는지 (화면 밖으로 안 넘치게)
+            from modules.fonts import max_chars_for_font
+            _fit = max_chars_for_font(sub_font_size)
+            st.caption(f"↳ 이 크기면 한 줄에 **최대 {_fit}자**까지 들어갑니다")
+
             max_chars = st.slider(
                 "자막 한 줄 최대 글자 수",
-                min_value=10, max_value=30, value=18,
-                help="쇼츠는 15~20자 권장"
+                min_value=5, max_value=_fit,
+                value=min(_fit, 12),
+                help="글씨 크기에 맞춰 넘치지 않는 범위로 제한됩니다. "
+                     "대본에 띄어쓰기를 2칸 이상 넣으면 그 자리에서 줄이 바뀝니다.",
             )
 
             max_lines_block = st.slider(
                 "한 자막에 보일 최대 줄 수",
                 min_value=1, max_value=3, value=2,
                 help="1로 하면 자막이 항상 한 줄로만 나옵니다",
-            )
-
-            sub_font_size = st.slider(
-                "자막 글씨 크기",
-                min_value=12, max_value=40,
-                value=20, key='sub_font_size',
-                help="쇼츠는 20~26 정도가 잘 보입니다",
             )
 
             sub_pos_pct = st.slider(
@@ -1435,6 +1446,17 @@ if _active == 3:
                     bg_video=_pv_bg,
                 )
                 st.image(_pv_out, use_container_width=True)
+
+                # 띄어쓰기로 직접 나눈 줄이 너무 길면 화면 밖으로 나갑니다
+                _too_long = [
+                    ln for ln in _pv_blocks[_pv_idx].split("\n") if len(ln) > _fit
+                ]
+                if _too_long:
+                    st.warning(
+                        f"⚠️ 이 줄이 **{_fit}자**를 넘어 화면 밖으로 잘립니다: "
+                        f"「{_too_long[0]}」 ({len(_too_long[0])}자)\n\n"
+                        "글씨 크기를 줄이거나 띄어쓰기를 넣어 줄을 더 나눠 주세요."
+                    )
             except Exception as e:
                 st.warning(f"⚠️ 미리보기를 만들지 못했습니다: {e}")
 
