@@ -150,10 +150,12 @@ def generate_scripts(
     target_audience: str,
     api_key: str,
     additional_info: str = "",
-    model: str = "claude-sonnet-5"
+    model: str = "claude-sonnet-5",
+    provider: str = "",        # "gemini"(무료) 또는 "claude"(유료)
+    gemini_key: str = "",
 ) -> dict:
     """
-    Claude API를 호출하여 쇼핑 쇼츠 대본 3가지 버전을 생성합니다.
+    AI를 호출하여 쇼핑 쇼츠 대본 3가지 버전을 생성합니다.
 
     Args:
         image_analysis: image_analyzer.py의 분석 결과
@@ -162,11 +164,22 @@ def generate_scripts(
         api_key: Anthropic API 키
         additional_info: 추가 상품 정보 (선택)
         model: Claude 모델 ID
+        provider: "gemini"면 무료 할당량으로, "claude"면 유료로 생성합니다
+        gemini_key: Google AI Studio API 키 (provider="gemini"일 때)
 
     Returns:
         생성된 대본 딕셔너리
     """
-    client = anthropic.Anthropic(api_key=api_key)
+    from modules.ai_provider import (
+        PROVIDER_GEMINI, ProviderError, extract_json,
+        gemini_generate, resolve_provider,
+    )
+    provider = resolve_provider(provider)
+
+    SYSTEM_PROMPT = """당신은 대한민국 최고의 쇼핑 쇼츠 카피라이터입니다.
+유튜브 쇼츠와 인스타그램 릴스에서 구매 전환율을 높이는
+감성적이고 임팩트 있는 대본 작성에 특화되어 있습니다.
+항상 JSON 형식으로만 응답합니다."""
 
     # 프롬프트 구성
     prompt = build_script_prompt(
@@ -176,6 +189,41 @@ def generate_scripts(
         additional_info=additional_info,
     )
 
+    # ══ Gemini (무료 할당량) ══════════════════════
+    if provider == PROVIDER_GEMINI:
+        raw_text = ""
+        try:
+            raw_text, usage = gemini_generate(
+                api_key=gemini_key,
+                prompt=prompt,
+                system=SYSTEM_PROMPT,
+                max_tokens=12000,   # 대본 3버전 + '생각' 토큰까지 넉넉하게
+                temperature=0.95,   # 카피는 과감하게
+            )
+            logger.info("대본 생성 완료 (Gemini)")
+
+            return {
+                "success": True,
+                "scripts_data": extract_json(raw_text),
+                "raw_response": raw_text,
+                "provider": "gemini",
+                "usage": usage,
+            }
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON 파싱 실패, 원본 텍스트 반환: {e}")
+            return {
+                "success": True,
+                "scripts_data": {"raw_text": raw_text},
+                "raw_response": raw_text,
+                "provider": "gemini",
+                "usage": {},
+            }
+        except ProviderError as e:
+            raise RuntimeError(str(e))
+
+    # ══ Claude (유료) ═════════════════════════════
+    client = anthropic.Anthropic(api_key=api_key)
+
     logger.info("대본 생성 중... Claude API 호출")
 
     try:
@@ -183,25 +231,14 @@ def generate_scripts(
             model=model,
             # 대본 3버전에 2500토큰이면 충분합니다 (4000 → 2500, 출력 요금 34% 절감)
             max_tokens=2500,
-            system="""당신은 대한민국 최고의 쇼핑 쇼츠 카피라이터입니다.
-유튜브 쇼츠와 인스타그램 릴스에서 구매 전환율을 높이는
-감성적이고 임팩트 있는 대본 작성에 특화되어 있습니다.
-항상 JSON 형식으로만 응답합니다.""",
+            system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
 
         raw_text = response.content[0].text
         logger.info("대본 생성 완료")
 
-        # JSON 파싱
-        import re
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw_text)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            json_str = raw_text
-
-        scripts_data = json.loads(json_str)
+        scripts_data = extract_json(raw_text)
 
         try:
             from modules.cost_tracker import record
@@ -213,6 +250,7 @@ def generate_scripts(
             "success": True,
             "scripts_data": scripts_data,
             "raw_response": raw_text,
+            "provider": "claude",
             "usage": {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,

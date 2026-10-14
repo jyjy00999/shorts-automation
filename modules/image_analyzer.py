@@ -72,16 +72,20 @@ def analyze_product_images(
     images: list[Union[str, bytes, BytesIO]],
     api_key: str,
     target_audience: str = "일반 소비자",
-    model: str = "claude-sonnet-5"  # 최신 Claude 모델
+    model: str = "claude-sonnet-5",  # 최신 Claude 모델
+    provider: str = "",              # "gemini"(무료) 또는 "claude"(유료)
+    gemini_key: str = "",
 ) -> dict:
     """
-    상품 이미지들을 Claude Vision으로 분석하여 마케팅 인사이트를 추출합니다.
+    상품 이미지들을 AI Vision으로 분석하여 마케팅 인사이트를 추출합니다.
 
     Args:
         images: 이미지 파일 경로 또는 bytes 리스트
         api_key: Anthropic API 키
         target_audience: 타겟 고객 설명 (예: "5060 시니어", "2030 직장인")
         model: 사용할 Claude 모델 ID
+        provider: "gemini"면 무료 할당량으로, "claude"면 유료로 분석합니다
+        gemini_key: Google AI Studio API 키 (provider="gemini"일 때)
 
     Returns:
         상품 분석 결과 딕셔너리
@@ -89,30 +93,36 @@ def analyze_product_images(
     if not images:
         raise ValueError("분석할 이미지가 없습니다.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    from modules.ai_provider import (
+        PROVIDER_GEMINI, ProviderError, extract_json,
+        gemini_generate, resolve_provider,
+    )
+    provider = resolve_provider(provider)
 
-    # ── 멀티 이미지 메시지 구성 ──────────────────────
-    content = []
-
-    # 분석할 이미지들을 content에 추가
+    # ── 이미지를 Base64로 변환 ──────────────────────
+    encoded = []
     for i, img_source in enumerate(images[:MAX_IMAGES]):
         try:
-            b64_data, media_type = image_to_base64(img_source)
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": b64_data,
-                }
-            })
+            encoded.append(image_to_base64(img_source))
             logger.info(f"이미지 {i+1} 변환 완료")
         except Exception as e:
             logger.warning(f"이미지 {i+1} 변환 실패: {e}")
             continue
 
-    if not content:
+    if not encoded:
         raise RuntimeError("변환 가능한 이미지가 없습니다.")
+
+    content = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": b64_data,
+            }
+        }
+        for b64_data, media_type in encoded
+    ]
 
     # ── 분석 프롬프트 ──────────────────────────────
     analysis_prompt = f"""당신은 쇼핑 쇼츠 전문 마케터입니다.
@@ -147,9 +157,43 @@ def analyze_product_images(
         "text": analysis_prompt
     })
 
-    # ── API 호출 ──────────────────────────────────
+    raw_text = ""
+
+    # ══ Gemini (무료 할당량) ══════════════════════
+    if provider == PROVIDER_GEMINI:
+        try:
+            raw_text, usage = gemini_generate(
+                api_key=gemini_key,
+                prompt=analysis_prompt,
+                system="당신은 쇼핑 쇼츠 전문 마케터입니다. 항상 JSON 형식으로만 한국어로 응답합니다.",
+                images=encoded,
+                max_tokens=8000,
+                temperature=0.4,   # 분석은 사실 위주라 낮게
+            )
+            logger.info("이미지 분석 완료 (Gemini)")
+
+            analysis = extract_json(raw_text)
+            analysis['image_count'] = len(encoded)
+            analysis['raw_response'] = raw_text
+            analysis['_provider'] = "gemini"
+
+            return {"success": True, "analysis": analysis, "usage": usage}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON 파싱 오류: {e}")
+            return {
+                "success": True,
+                "analysis": {"raw_text": raw_text, "parse_error": str(e)},
+                "usage": {},
+            }
+        except ProviderError as e:
+            raise RuntimeError(str(e))
+
+    # ══ Claude (유료) ═════════════════════════════
+    client = anthropic.Anthropic(api_key=api_key)
+
     try:
-        logger.info(f"Claude Vision API 호출 중... (이미지 {len(content)-1}장)")
+        logger.info(f"Claude Vision API 호출 중... (이미지 {len(encoded)}장)")
         response = client.messages.create(
             model=model,
             max_tokens=2000,
@@ -159,16 +203,10 @@ def analyze_product_images(
         raw_text = response.content[0].text
         logger.info("이미지 분석 완료")
 
-        # JSON 파싱 (마크다운 코드 블록 제거)
-        json_match = __import__('re').search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw_text)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            json_str = raw_text
-
-        analysis = json.loads(json_str)
-        analysis['image_count'] = len(content) - 1  # 분석된 이미지 수
+        analysis = extract_json(raw_text)
+        analysis['image_count'] = len(encoded)  # 분석된 이미지 수
         analysis['raw_response'] = raw_text
+        analysis['_provider'] = "claude"
 
         try:
             from modules.cost_tracker import record

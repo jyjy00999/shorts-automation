@@ -349,18 +349,64 @@ with st.sidebar:
     st.markdown("## ⚙️ API 설정")
     st.markdown("---")
 
-    # Anthropic API 키
-    anthropic_key = st.text_input(
-        "🤖 Anthropic API 키",
-        value=clean_env(get_secret("ANTHROPIC_API_KEY", "")),
-        type="password",
-        help="https://console.anthropic.com 에서 발급",
-        placeholder="sk-ant-...",
-        key="input_anthropic_key",
+    # ── 어떤 AI로 분석·대본을 만들지 ────────────────
+    _saved_provider = clean_env(get_secret("AI_PROVIDER", "")) or "gemini"
+    _prov_options = ["gemini", "claude"]
+    _prov_labels = {
+        "gemini": "🆓 Gemini (무료)",
+        "claude": "💳 Claude (유료)",
+    }
+    ai_provider = st.radio(
+        "🧠 분석·대본 AI",
+        _prov_options,
+        index=_prov_options.index(_saved_provider) if _saved_provider in _prov_options else 0,
+        format_func=lambda p: _prov_labels[p],
+        horizontal=True,
+        key="input_ai_provider",
+        help="Gemini는 Google 무료 할당량으로 돌아갑니다 (카드 등록 불필요)",
     )
-    if anthropic_key and anthropic_key != clean_env(get_secret("ANTHROPIC_API_KEY", "")):
-        save_env("ANTHROPIC_API_KEY", anthropic_key)
-        st.success("✅ API 키 저장됨", icon="💾")
+    if ai_provider != _saved_provider:
+        save_env("AI_PROVIDER", ai_provider)
+
+    if ai_provider == "gemini":
+        gemini_key = st.text_input(
+            "🆓 Google Gemini API 키",
+            value=clean_env(get_secret("GEMINI_API_KEY", "")),
+            type="password",
+            help="https://aistudio.google.com/apikey 에서 무료 발급 (카드 등록 없음)",
+            placeholder="AIza...",
+            key="input_gemini_key",
+        )
+        if gemini_key and gemini_key != clean_env(get_secret("GEMINI_API_KEY", "")):
+            save_env("GEMINI_API_KEY", gemini_key)
+            st.success("✅ Gemini 키 저장됨", icon="💾")
+
+        if not gemini_key:
+            st.info(
+                "👉 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 에서\n"
+                "구글 로그인 → **Create API key** → 복사해서 위에 붙여넣기\n\n"
+                "카드 등록 없이 무료입니다."
+            )
+        else:
+            st.caption("💰 비용: **0원** (무료 할당량 사용)")
+        anthropic_key = clean_env(get_secret("ANTHROPIC_API_KEY", ""))
+    else:
+        gemini_key = clean_env(get_secret("GEMINI_API_KEY", ""))
+        # Anthropic API 키
+        anthropic_key = st.text_input(
+            "🤖 Anthropic API 키",
+            value=clean_env(get_secret("ANTHROPIC_API_KEY", "")),
+            type="password",
+            help="https://console.anthropic.com 에서 발급",
+            placeholder="sk-ant-...",
+            key="input_anthropic_key",
+        )
+        if anthropic_key and anthropic_key != clean_env(get_secret("ANTHROPIC_API_KEY", "")):
+            save_env("ANTHROPIC_API_KEY", anthropic_key)
+            st.success("✅ API 키 저장됨", icon="💾")
+
+    # 아래 코드들이 'AI 키가 있나?' 를 하나로 확인할 수 있게 합쳐 둡니다
+    ai_key_ok = bool(gemini_key) if ai_provider == "gemini" else bool(anthropic_key)
 
     # Typecast API 설정
     st.markdown("---")
@@ -431,7 +477,7 @@ with st.sidebar:
                     st.rerun()
 
     # 현재 저장 상태 표시
-    if clean_env(get_secret("ANTHROPIC_API_KEY", "")):
+    if clean_env(get_secret("ANTHROPIC_API_KEY", "")) or clean_env(get_secret("GEMINI_API_KEY", "")):
         st.caption("💾 키가 .env에 저장되어 있습니다")
 
     # 테스트 모드 안내
@@ -641,17 +687,21 @@ if _active == 0:
     # 실행 전 예상 비용 안내
     col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
     with col_btn2:
-        try:
-            from modules.cost_tracker import estimate_run
-            _n_img = len(uploaded_files) if uploaded_files else 3
-            _est = estimate_run(n_images=min(_n_img, 4), smart_match=False)
-            st.caption(
-                f"💰 예상 비용: 약 **{_est['krw']}원** "
-                f"(이미지 분석 {_est['detail'].get('이미지 분석', 0)}원 + "
-                f"대본 생성 {_est['detail'].get('대본 생성', 0)}원)"
-            )
-        except Exception:
-            pass
+        if ai_provider == "gemini":
+            st.caption("💰 예상 비용: **0원** — Gemini 무료 할당량으로 돌아갑니다")
+        else:
+            try:
+                from modules.cost_tracker import estimate_run
+                _n_img = len(uploaded_files) if uploaded_files else 3
+                _est = estimate_run(n_images=min(_n_img, 4), smart_match=False)
+                st.caption(
+                    f"💰 예상 비용: 약 **{_est['krw']}원** "
+                    f"(이미지 분석 {_est['detail'].get('이미지 분석', 0)}원 + "
+                    f"대본 생성 {_est['detail'].get('대본 생성', 0)}원) — "
+                    "사이드바에서 🆓 Gemini로 바꾸면 무료입니다"
+                )
+            except Exception:
+                pass
 
     # 분석 실행 버튼 (영상 분석 + 이미지 분석 + 대본 생성 한 번에)
     with col_btn2:
@@ -661,8 +711,14 @@ if _active == 0:
         ]
 
         if st.button("🚀 분석 + 대본 자동 생성", use_container_width=True, type="primary"):
-            if not anthropic_key:
-                st.error("❌ Anthropic API 키를 먼저 입력하세요 (사이드바)")
+            if not ai_key_ok:
+                if ai_provider == "gemini":
+                    st.error(
+                        "❌ Gemini API 키를 먼저 입력하세요 (사이드바) — "
+                        "[무료 발급받기](https://aistudio.google.com/apikey)"
+                    )
+                else:
+                    st.error("❌ Anthropic API 키를 먼저 입력하세요 (사이드바)")
             elif not uploaded_files and not _src_videos:
                 st.error("❌ 상품 이미지나 소재 영상 중 하나는 올려 주세요")
             else:
@@ -774,6 +830,8 @@ if _active == 0:
                             images=tmp_image_paths,
                             api_key=anthropic_key,
                             target_audience=target_audience,
+                            provider=ai_provider,
+                            gemini_key=gemini_key,
                         )
                         st.session_state['image_analysis'] = img_result
                         img_analysis = img_result.get('analysis', {})
@@ -791,6 +849,8 @@ if _active == 0:
                             target_audience=target_audience,
                             api_key=anthropic_key,
                             additional_info=additional_info,
+                            provider=ai_provider,
+                            gemini_key=gemini_key,
                         )
                         st.session_state['scripts_data'] = script_result
                         st.success("✅ 대본 생성 완료!")
@@ -849,13 +909,20 @@ if _active == 1:
 # 탭 ③: 대본 생성
 # ══════════════════════════════════════════════════
 
-def regenerate_scripts(api_key: str) -> bool:
+def regenerate_scripts(api_key: str, provider: str = "", g_key: str = "") -> bool:
     """지금 올라와 있는 영상·이미지를 다시 보고 대본을 새로 만듭니다.
 
     이미지 분석 결과가 없거나(= 샘플 대본만 떠 있는 상태) 비어 있으면
     업로드한 이미지 / 영상에서 뽑은 화면을 먼저 다시 분석한 뒤 대본을 만듭니다.
     """
-    if not api_key:
+    if provider == "gemini":
+        if not g_key:
+            st.error(
+                "❌ Gemini API 키를 먼저 입력하세요 (사이드바) — "
+                "[무료 발급받기](https://aistudio.google.com/apikey)"
+            )
+            return False
+    elif not api_key:
         st.error("❌ Anthropic API 키를 먼저 입력하세요 (사이드바)")
         return False
 
@@ -890,6 +957,8 @@ def regenerate_scripts(api_key: str) -> bool:
                     images=img_paths,
                     api_key=api_key,
                     target_audience=st.session_state.get('target_audience', '일반 소비자'),
+                    provider=provider,
+                    gemini_key=g_key,
                 )
                 st.session_state['image_analysis'] = img_result
                 img_analysis = img_result.get('analysis', {})
@@ -905,6 +974,8 @@ def regenerate_scripts(api_key: str) -> bool:
                 target_audience=st.session_state.get('target_audience', '일반 소비자'),
                 api_key=api_key,
                 additional_info=st.session_state.get('additional_info', ''),
+                provider=provider,
+                gemini_key=g_key,
             )
             st.session_state['scripts_data'] = result
             st.session_state['selected_script'] = ''   # 이전 선택 해제
@@ -932,38 +1003,10 @@ if _active == 2:
             col_center = st.columns([1, 2, 1])[1]
             with col_center:
                 if st.button("✨ 대본 3가지 버전 생성", use_container_width=True, type="primary"):
-                    with st.spinner("✍️ 구매 전환율 최고의 쇼핑 대본 작성 중..."):
-                        try:
-                            img_analysis = {}
-                            if st.session_state.get('image_analysis'):
-                                img_analysis = st.session_state['image_analysis'].get('analysis', {})
-
-                            result = generate_scripts(
-                                image_analysis=img_analysis,
-                                video_analysis=st.session_state.get('video_analysis', {}),
-                                target_audience=st.session_state.get('target_audience', '일반 소비자'),
-                                api_key=anthropic_key,
-                                additional_info=st.session_state.get('additional_info', ''),
-                            )
-                            st.session_state['scripts_data'] = result
-                            st.session_state['step'] = 4
-                            st.session_state['active_tab'] = 2
-                            st.rerun()
-                        except Exception as e:
-                            err_msg = str(e)
-                            if "크레딧 부족" in err_msg or "billing" in err_msg.lower() or "credit" in err_msg.lower():
-                                st.warning(
-                                    "💳 크레딧 부족 → 샘플 대본으로 진행합니다. "
-                                    "(console.anthropic.com/settings/billing 에서 충전)"
-                                )
-                                st.session_state['scripts_data'] = generate_test_scripts(
-                                    st.session_state.get('target_audience', '일반 소비자')
-                                )
-                                st.session_state['step'] = 4
-                                st.session_state['active_tab'] = 2
-                                st.rerun()
-                            else:
-                                st.error(f"❌ 대본 생성 오류: {e}")
+                    if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
+                        st.session_state['step'] = 4
+                        st.session_state['active_tab'] = 2
+                        st.rerun()
 
         # 대본 표시
         if st.session_state.get('scripts_data'):
@@ -1013,7 +1056,7 @@ if _active == 2:
                                     use_container_width=True,
                                     help="지금 올린 영상·이미지를 다시 보고 대본을 새로 만듭니다",
                                 ):
-                                    if regenerate_scripts(anthropic_key):
+                                    if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
                                         st.success("✅ 올린 소재에 맞는 대본으로 새로 만들었습니다!")
                                         st.rerun()
 
@@ -1054,7 +1097,7 @@ if _active == 2:
                         use_container_width=True,
                         help="올린 영상·이미지 그대로, 대본만 새로 만듭니다",
                     ):
-                        if regenerate_scripts(anthropic_key):
+                        if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
                             st.rerun()
                 with col_r2:
                     if st.button(
@@ -1064,7 +1107,7 @@ if _active == 2:
                     ):
                         st.session_state.pop('image_analysis', None)
                         st.session_state.pop('scripts_data', None)
-                        if regenerate_scripts(anthropic_key):
+                        if regenerate_scripts(anthropic_key, ai_provider, gemini_key):
                             st.rerun()
 
             else:
@@ -1628,7 +1671,11 @@ if _active == 4:
                         "(Anthropic 크레딧이 조금 듭니다)"
                     )
                 else:
-                    st.warning("⚠️ Anthropic API 키가 없어 순서대로 배치됩니다.")
+                    st.warning(
+                        "⚠️ 똑똑한 장면 매칭은 **Anthropic(Claude) 키**가 있어야 합니다. "
+                        "키가 없어서 장면을 순서대로 배치합니다. "
+                        "(분석·대본은 Gemini 무료로 그대로 됩니다)"
+                    )
             else:
                 st.caption("장면을 순서대로 배치합니다. 내용과 화면이 안 맞을 수 있습니다.")
 
