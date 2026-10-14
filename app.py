@@ -1266,14 +1266,38 @@ if _active == 3:
         col1, col2 = st.columns([3, 2])
 
         with col1:
-            st.markdown("#### 📝 사용할 대본 (수정 가능)")
+            # ③탭에서 다른 버전을 고르면 편집창을 그 대본으로 새로 채웁니다
+            if st.session_state.get('_script_loaded') != current_script:
+                st.session_state['script_textarea'] = current_script
+                st.session_state['_script_loaded'] = current_script
+
+            _sc_h1, _sc_h2 = st.columns([2, 1])
+            with _sc_h1:
+                st.markdown("#### 📝 사용할 대본 (수정 가능)")
+            with _sc_h2:
+                if st.button(
+                    "✂️ 문장마다 줄바꿈",
+                    use_container_width=True,
+                    help="한 문단으로 붙어 있는 대본을 문장마다 한 줄로 나눕니다. "
+                         "'대본 한 줄 = 자막 한 장면'과 같이 쓰면 깔끔해집니다.",
+                ):
+                    from modules.srt_generator import resplit_script_by_sentence
+                    st.session_state['script_textarea'] = resplit_script_by_sentence(
+                        st.session_state.get('script_textarea', '')
+                    )
+                    st.rerun()
+
             edited_script = st.text_area(
                 "대본",
-                value=current_script,
                 height=300,
-                help="여기서 직접 수정 후 생성할 수 있습니다",
-                label_visibility="collapsed"
+                help="여기서 직접 수정 후 생성할 수 있습니다. "
+                     "**한 줄이 자막 한 장면**이 됩니다.",
+                label_visibility="collapsed",
+                key="script_textarea",
             )
+
+            _n_lines = len([l for l in (edited_script or "").splitlines() if l.strip()])
+            st.caption(f"📐 지금 **{_n_lines}줄** → 자막 장면이 그만큼 만들어집니다")
 
         with col2:
             st.markdown("#### 🎙️ 음성 설정")
@@ -1295,10 +1319,24 @@ if _active == 3:
             )
 
             st.markdown("#### 📄 자막 설정")
+
+            one_line_per_scene = st.checkbox(
+                "대본 한 줄 = 자막 한 장면",
+                value=True,
+                help="대본의 줄바꿈을 그대로 지킵니다. "
+                     "서로 다른 줄의 내용이 한 자막에 섞이지 않습니다.",
+            )
+
             max_chars = st.slider(
                 "자막 한 줄 최대 글자 수",
                 min_value=10, max_value=30, value=18,
                 help="쇼츠는 15~20자 권장"
+            )
+
+            max_lines_block = st.slider(
+                "한 자막에 보일 최대 줄 수",
+                min_value=1, max_value=3, value=2,
+                help="1로 하면 자막이 항상 한 줄로만 나옵니다",
             )
 
             sub_font_size = st.slider(
@@ -1473,6 +1511,8 @@ if _active == 3:
                                 total_duration_sec=duration,
                                 output_path=srt_path,
                                 max_chars_per_line=max_chars,
+                                max_lines_per_block=max_lines_block,
+                                respect_line_breaks=one_line_per_scene,
                             )
                             st.session_state['srt_path'] = srt_path
 

@@ -25,10 +25,32 @@ def seconds_to_srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
 
 
+def split_into_sentences(text: str) -> list[str]:
+    """한 덩어리 글을 문장 단위로 나눕니다 (마침표·물음표·느낌표 기준)."""
+    parts = re.split(r'(?<=[.!?~])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def resplit_script_by_sentence(script: str) -> str:
+    """대본을 '문장마다 한 줄'로 다시 정리합니다.
+
+    AI가 여러 문장을 한 문단으로 붙여 놓았을 때,
+    '대본 한 줄 = 자막 한 장면' 을 쓰려면 먼저 줄을 나눠야 합니다.
+    """
+    out = []
+    for line in str(script).strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        out.extend(split_into_sentences(line))
+    return "\n".join(out)
+
+
 def split_script_into_lines(
     script: str,
     max_chars_per_line: int = 18,
     max_lines_per_block: int = 2,
+    respect_line_breaks: bool = True,
 ) -> list[str]:
     """
     대본 텍스트를 자막 블록으로 분할합니다.
@@ -42,15 +64,14 @@ def split_script_into_lines(
         script: 전체 대본 텍스트
         max_chars_per_line: 한 줄 최대 글자 수
         max_lines_per_block: 블록당 최대 줄 수
+        respect_line_breaks: True면 대본의 줄바꿈을 그대로 지킵니다.
+            즉 **대본 한 줄 = 자막 한 장면**이 되고, 서로 다른 줄의
+            내용이 한 자막에 섞이지 않습니다.
+            (한 줄이 너무 길면 그 줄 안에서만 문장 단위로 더 나눕니다)
 
     Returns:
         자막 블록 리스트 (각 블록이 하나의 SRT 항목이 됨)
     """
-    # 1. 구두점 기준으로 문장 분리
-    # 마침표, 느낌표, 물음표, 줄바꿈, 쉼표(긴 구문의 경우) 기준
-    sentences = re.split(r'(?<=[.!?~\n])\s*|(?<=,)\s+', script.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
-
     def wrap_words(text: str) -> list[str]:
         """
         어절(띄어쓰기) 단위로 줄을 채웁니다.
@@ -85,30 +106,57 @@ def split_script_into_lines(
             lines.append(cur)
         return lines
 
+    # ── 1) 큰 덩어리 나누기 ──────────────────────
+    # 줄바꿈을 지키면 '대본 한 줄'이 곧 한 덩어리가 됩니다.
+    if respect_line_breaks:
+        segments = [l.strip() for l in script.strip().splitlines() if l.strip()]
+    else:
+        # 예전 방식: 줄바꿈을 무시하고 전체를 문장·쉼표로 다시 쪼갭니다
+        segments = [script.strip()]
+
+    if not segments:
+        return []
+
+    # ── 2) 덩어리마다 자막 블록 만들기 ────────────
     blocks = []
-    current_lines = []
+    for seg in segments:
+        wrapped = wrap_words(seg)
 
-    for sentence in sentences:
-        for line in wrap_words(sentence):
-            current_lines.append(line)
-            if len(current_lines) >= max_lines_per_block:
-                blocks.append("\n".join(current_lines))
-                current_lines = []
+        # 한 장면에 들어갈 만큼 짧으면 → 그대로 한 블록
+        if len(wrapped) <= max_lines_per_block:
+            blocks.append("\n".join(wrapped))
+            continue
 
-        # 한 줄짜리 짧은 문장은 다음 문장과 합칠 여지를 둡니다.
-        # (문장마다 무조건 끊으면 '저도 그랬어요.' 같은 한 줄이
-        #  독립 자막이 되어 너무 잘게 깜빡입니다)
-        if len(current_lines) >= max_lines_per_block:
-            blocks.append("\n".join(current_lines))
-            current_lines = []
+        # 너무 길면 이 줄 안에서만 문장 단위로 더 나눕니다
+        # (다른 줄의 내용과는 절대 섞이지 않습니다)
+        sentences = split_into_sentences(seg)
+        if len(sentences) <= 1:
+            # 문장이 하나뿐인데 길면 어쩔 수 없이 줄 수로 자릅니다
+            for i in range(0, len(wrapped), max_lines_per_block):
+                blocks.append("\n".join(wrapped[i:i + max_lines_per_block]))
+            continue
 
-    if current_lines:
-        blocks.append("\n".join(current_lines))
+        cur_lines = []
+        for sentence in sentences:
+            s_lines = wrap_words(sentence)
+            # 넣으면 넘칠 때는 지금까지 모은 걸 먼저 내보냅니다
+            if cur_lines and len(cur_lines) + len(s_lines) > max_lines_per_block:
+                blocks.append("\n".join(cur_lines))
+                cur_lines = []
+            cur_lines.extend(s_lines)
+            while len(cur_lines) > max_lines_per_block:
+                blocks.append("\n".join(cur_lines[:max_lines_per_block]))
+                cur_lines = cur_lines[max_lines_per_block:]
+        if cur_lines:
+            blocks.append("\n".join(cur_lines))
 
     # 빈 블록 제거
     blocks = [b for b in blocks if b.strip()]
 
-    logger.info(f"대본 분할 완료: {len(sentences)}개 문장 → {len(blocks)}개 자막 블록")
+    logger.info(
+        f"대본 분할 완료: {len(segments)}개 줄 → {len(blocks)}개 자막 블록 "
+        f"(줄바꿈 지킴={respect_line_breaks})"
+    )
     return blocks
 
 
@@ -175,6 +223,8 @@ def generate_srt(
     total_duration_sec: float,
     output_path: str,
     max_chars_per_line: int = 18,
+    max_lines_per_block: int = 2,
+    respect_line_breaks: bool = True,
 ) -> str:
     """
     대본과 오디오 길이를 기반으로 SRT 파일을 생성합니다.
@@ -184,6 +234,8 @@ def generate_srt(
         total_duration_sec: 오디오 총 길이 (초)
         output_path: 저장할 SRT 파일 경로
         max_chars_per_line: 한 줄 최대 글자 수
+        max_lines_per_block: 한 자막에 들어갈 최대 줄 수
+        respect_line_breaks: 대본 한 줄 = 자막 한 장면
 
     Returns:
         저장된 SRT 파일 경로
@@ -191,7 +243,12 @@ def generate_srt(
     logger.info(f"SRT 생성 시작: 총 {total_duration_sec:.1f}초")
 
     # 1. 대본을 자막 블록으로 분할
-    blocks = split_script_into_lines(script, max_chars_per_line=max_chars_per_line)
+    blocks = split_script_into_lines(
+        script,
+        max_chars_per_line=max_chars_per_line,
+        max_lines_per_block=max_lines_per_block,
+        respect_line_breaks=respect_line_breaks,
+    )
 
     if not blocks:
         logger.warning("자막 블록이 없습니다.")
