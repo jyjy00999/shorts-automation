@@ -1301,6 +1301,104 @@ if _active == 3:
                 help="쇼츠는 15~20자 권장"
             )
 
+            sub_font_size = st.slider(
+                "자막 글씨 크기",
+                min_value=12, max_value=40,
+                value=20, key='sub_font_size',
+                help="쇼츠는 20~26 정도가 잘 보입니다",
+            )
+
+            sub_pos_pct = st.slider(
+                "자막 높이 (화면 아래에서 %)",
+                min_value=5, max_value=70,
+                value=24, key='sub_pos_pct',
+                help="숫자가 클수록 자막이 위로 올라갑니다",
+            )
+
+        # ── 자막 미리보기 ─────────────────────────
+        st.markdown("---")
+        st.markdown("#### 👀 자막 미리보기")
+
+        _pv_col1, _pv_col2 = st.columns([1, 1])
+
+        def _wrap_preview(text: str, limit: int) -> list:
+            """미리보기 문구를 '한 줄 최대 글자 수'에 맞춰 단어 단위로 자릅니다."""
+            out, cur = [], ""
+            for w in str(text).split():
+                if len(f"{cur} {w}".strip()) <= limit:
+                    cur = f"{cur} {w}".strip()
+                else:
+                    if cur:
+                        out.append(cur)
+                    cur = w
+            if cur:
+                out.append(cur)
+            return out
+
+        with _pv_col2:
+            st.caption(
+                "지금 설정한 **크기·위치 그대로** 영상에 들어갑니다. "
+                "실제 영상에 입힐 때와 똑같은 방식으로 그린 화면입니다."
+            )
+
+            # 미리볼 문구 기본값 = 대본 첫 줄
+            if 'sub_preview_text' not in st.session_state:
+                _first = next(
+                    (l.strip() for l in (edited_script or "").splitlines() if l.strip()),
+                    "자막이 여기에 표시됩니다",
+                )
+                st.session_state['sub_preview_text'] = _first
+
+            st.text_input(
+                "미리볼 문구",
+                key='sub_preview_text',
+                help="바꿔서 길이를 확인해 볼 수 있습니다",
+            )
+
+            # 올린 소재 영상이 있으면 그 위에 얹어서 보여 줍니다
+            _pv_videos = [
+                p for p in st.session_state.get('source_videos', [])
+                if os.path.exists(p)
+            ]
+            _pv_bg = ""
+            if _pv_videos:
+                _pv_names = [Path(p).name for p in _pv_videos]
+                _bg_choice = st.selectbox(
+                    "배경",
+                    ["회색 배경"] + _pv_names,
+                    help="올린 영상 위에 얹어 보면 더 정확합니다",
+                )
+                if _bg_choice != "회색 배경":
+                    _pv_bg = _pv_videos[_pv_names.index(_bg_choice)]
+
+        with _pv_col1:
+            try:
+                from modules.fonts import render_subtitle_preview, pct_to_margin
+
+                _pv_show = _wrap_preview(
+                    st.session_state.get('sub_preview_text', ''), max_chars
+                ) or ["자막이 여기에 표시됩니다"]
+
+                _pv_out = os.path.join(
+                    tempfile.gettempdir(), "shorts_subtitle_preview.png"
+                )
+                render_subtitle_preview(
+                    text="\n".join(_pv_show[:3]),
+                    out_path=_pv_out,
+                    font_size=sub_font_size,
+                    margin_v=pct_to_margin(sub_pos_pct),
+                    bg_video=_pv_bg,
+                )
+                st.image(_pv_out, use_container_width=True)
+
+                if len(_pv_show) > 3:
+                    st.caption(
+                        f"⚠️ 이 문구는 {len(_pv_show)}줄이 됩니다. "
+                        "'한 줄 최대 글자 수'를 늘리거나 대본을 짧게 끊어 주세요."
+                    )
+            except Exception as e:
+                st.warning(f"⚠️ 미리보기를 만들지 못했습니다: {e}")
+
         st.markdown("---")
 
         if st.button("🎙️ 음성 + 자막 생성", use_container_width=True, type="primary"):
@@ -1749,6 +1847,15 @@ if _active == 4:
                         st.error("❌ 자막(SRT)이 없습니다. '④ 음성·자막' 탭에서 먼저 생성해 주세요.")
                     else:
                         from modules.clip_editor import auto_cut_edit
+                        from modules.fonts import set_subtitle_style, pct_to_margin
+
+                        # ④탭에서 고른 자막 크기·위치를 적용합니다
+                        set_subtitle_style(
+                            font_size=st.session_state.get('sub_font_size', 20),
+                            margin_v=pct_to_margin(
+                                st.session_state.get('sub_pos_pct', 24)
+                            ),
+                        )
 
                         bar = st.progress(0.0, text="준비 중...")
 
@@ -1797,6 +1904,18 @@ if _active == 4:
                                     create_product_slideshow,
                                     render_with_ffmpeg_direct,
                                 )
+                                from modules.fonts import (
+                                    set_subtitle_style, pct_to_margin,
+                                )
+
+                                # ④탭에서 고른 자막 크기·위치를 적용합니다
+                                set_subtitle_style(
+                                    font_size=st.session_state.get('sub_font_size', 20),
+                                    margin_v=pct_to_margin(
+                                        st.session_state.get('sub_pos_pct', 24)
+                                    ),
+                                )
+
                                 out_mp4 = os.path.join(
                                     "outputs",
                                     f"shorts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"

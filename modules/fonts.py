@@ -100,10 +100,47 @@ def _escape_for_filter(path: str) -> str:
     return os.path.abspath(path).replace('\\', '/').replace(':', r'\:')
 
 
+# ── 자막 스타일 기본값 ────────────────────────────
+# 앱(사이드바/④탭)에서 조절하면 set_subtitle_style() 로 여기에 반영되고,
+# 영상을 만드는 쪽(clip_editor / video_renderer)은 이 값을 그대로 씁니다.
+#
+# 단위 주의: libass 는 SRT 를 PlayResY=288 기준으로 그린 뒤 영상 높이에 맞춰
+# 늘립니다. 그래서 FontSize·MarginV 는 '288칸 중 몇 칸' 이라는 뜻입니다.
+PLAY_RES_Y = 288
+
+DEFAULT_FONT_SIZE = 20     # 288 기준 → 1920 영상에서 약 133px
+DEFAULT_MARGIN_V = 70      # 288 기준 → 아래에서 약 24% 위
+
+_style = {"font_size": DEFAULT_FONT_SIZE, "margin_v": DEFAULT_MARGIN_V}
+
+
+def set_subtitle_style(font_size: int = None, margin_v: int = None):
+    """영상을 만들기 직전에 앱이 고른 자막 크기·위치를 적용합니다."""
+    if font_size:
+        _style["font_size"] = int(font_size)
+    if margin_v is not None:
+        _style["margin_v"] = int(margin_v)
+    logger.info(f"자막 스타일: 크기 {_style['font_size']}, 위치 {_style['margin_v']}")
+
+
+def get_subtitle_style() -> dict:
+    return dict(_style)
+
+
+def pct_to_margin(pct: float) -> int:
+    """'아래에서 N%' 를 libass MarginV 값으로 바꿉니다."""
+    return max(0, min(PLAY_RES_Y - 10, int(round(pct / 100.0 * PLAY_RES_Y))))
+
+
+def margin_to_pct(margin_v: int) -> float:
+    """libass MarginV 값을 '아래에서 N%' 로 바꿉니다."""
+    return round(margin_v / PLAY_RES_Y * 100.0, 1)
+
+
 def subtitle_filter(
     srt_path: str,
-    font_size: int = 20,
-    margin_v: int = 70,
+    font_size: int = None,
+    margin_v: int = None,
     outline: int = 3,
     extra_style: str = "",
 ) -> str:
@@ -114,7 +151,14 @@ def subtitle_filter(
 
     외곽선(Outline)을 3으로 둔 이유: 한글은 획이 많아서 2로 하면
     글자 사이에서 테두리가 끊겨 지저분해 보입니다.
+
+    font_size / margin_v 를 안 주면 앱에서 고른 값(_style)을 씁니다.
     """
+    if font_size is None:
+        font_size = _style["font_size"]
+    if margin_v is None:
+        margin_v = _style["margin_v"]
+
     esc_srt = _escape_for_filter(srt_path)
 
     found = find_korean_font()
@@ -136,6 +180,67 @@ def subtitle_filter(
         filt += f":fontsdir='{esc_dir}'"
     filt += f":force_style='{style}'"
     return filt
+
+
+def render_subtitle_preview(
+    text: str,
+    out_path: str,
+    font_size: int = None,
+    margin_v: int = None,
+    bg_video: str = "",
+    bg_seek: float = 1.0,
+    width: int = 540,
+    height: int = 960,
+) -> str:
+    """자막이 화면 어디에 어떤 크기로 올라가는지 미리보기 PNG를 만듭니다.
+
+    영상에 실제로 자막을 입힐 때와 '똑같은 필터'를 쓰기 때문에
+    여기서 보이는 그대로 결과물에 나옵니다.
+
+    Args:
+        text: 미리볼 자막 (줄바꿈으로 여러 줄)
+        bg_video: 배경으로 쓸 영상 (없으면 회색 배경)
+        bg_seek: 배경 영상에서 몇 초 지점을 쓸지
+    """
+    import subprocess
+    import tempfile
+
+    out_path = os.path.abspath(out_path)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # 미리보기용 임시 SRT (10초짜리 한 블록)
+    lines = [l.strip() for l in str(text).strip().splitlines() if l.strip()][:3]
+    if not lines:
+        lines = ["자막 미리보기"]
+
+    tmp_srt = os.path.join(tempfile.gettempdir(), "subtitle_preview.srt")
+    with open(tmp_srt, "w", encoding="utf-8") as f:
+        f.write("1\n00:00:00,000 --> 00:00:10,000\n" + "\n".join(lines) + "\n")
+
+    vf = subtitle_filter(tmp_srt, font_size=font_size, margin_v=margin_v)
+
+    if bg_video and os.path.exists(bg_video):
+        # 올린 영상의 한 장면 위에 얹어 봅니다 (가장 정확한 미리보기)
+        cmd = [
+            "ffmpeg", "-y", "-v", "error",
+            "-ss", str(bg_seek), "-i", os.path.abspath(bg_video),
+            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                   f"crop={width}:{height},{vf}",
+            "-frames:v", "1", out_path,
+        ]
+    else:
+        # 영상이 없으면 눈금 있는 회색 배경 위에 그립니다
+        cmd = [
+            "ffmpeg", "-y", "-v", "error",
+            "-f", "lavfi", "-i", f"color=c=0x3a3a44:s={width}x{height}:d=1",
+            "-vf", vf, "-frames:v", "1", out_path,
+        ]
+
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        raise RuntimeError(f"자막 미리보기 실패:\n{(r.stderr or '')[-300:]}")
+    return out_path
 
 
 def font_status() -> dict:
