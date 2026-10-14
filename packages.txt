@@ -1,1 +1,4 @@
 ffmpeg
+fonts-nanum
+fonts-nanum-extra
+fontconfig

@@ -3,7 +3,12 @@
 
 # 결과물·소재 (용량이 크고 개인 자료입니다)
 outputs/
-assets/
+assets/*
+# 단, 한글 자막 폰트는 올립니다.
+# (클라우드 리눅스에는 한글 폰트가 없어서 자막이 □□□ 로 나옵니다)
+!assets/fonts/
+!assets/fonts/*.ttf
+!assets/fonts/*.otf
 
 # 파이썬
 __pycache__/

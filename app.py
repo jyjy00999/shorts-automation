@@ -510,6 +510,17 @@ with st.sidebar:
     if not typecast_key:
         st.info("💡 Typecast 키 없으면\n자동으로 **테스트 모드** (무음 파일)로 진행됩니다")
 
+    # 한글 자막 폰트 상태 (□□□ 방지)
+    try:
+        from modules.fonts import font_status
+        _fs = font_status()
+        if _fs["ok"]:
+            st.caption(f"🔤 한글 자막 폰트: **{_fs['name']}** ✅")
+        else:
+            st.error("🔤 한글 폰트 없음 — 자막이 □□□ 로 나옵니다\n\n" + _fs["hint"])
+    except Exception:
+        pass
+
     st.markdown("---")
 
     # ── API 사용액 ────────────────────────────────

@@ -430,15 +430,10 @@ def render_with_ffmpeg_direct(
 
     last_label = 'vcat'
     if srt_path and os.path.exists(srt_path):
-        # Windows 경로를 subtitles 필터용으로 이스케이프
-        #   C:\a\b.srt  ->  C\:/a/b.srt
-        esc = os.path.abspath(srt_path).replace('\\', '/').replace(':', r'\:')
-        style = (
-            'FontName=Malgun Gothic,FontSize=18,'
-            'PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,'
-            'Outline=2,Shadow=0,Bold=1,Alignment=2,MarginV=60'
-        )
-        parts.append(f"[vcat]subtitles='{esc}':force_style='{style}'[vout]")
+        # 이 컴퓨터에 실제로 있는 한글 폰트를 찾아서 씁니다
+        # (하드코딩하면 리눅스에서 자막이 □□□ 로 나옵니다)
+        from modules.fonts import subtitle_filter
+        parts.append(f"[vcat]{subtitle_filter(srt_path)}[vout]")
         last_label = 'vout'
 
     cmd += [

@@ -945,13 +945,8 @@ def render_cut_video(
                '-i', os.path.abspath(audio_path)]
 
         if srt_path and os.path.exists(srt_path):
-            esc = os.path.abspath(srt_path).replace('\\', '/').replace(':', r'\:')
-            style = (
-                'FontName=Malgun Gothic,FontSize=18,'
-                'PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,'
-                'Outline=2,Shadow=0,Bold=1,Alignment=2,MarginV=60'
-            )
-            cmd += ['-vf', f"subtitles='{esc}':force_style='{style}'"]
+            from modules.fonts import subtitle_filter
+            cmd += ['-vf', subtitle_filter(srt_path)]
 
         cmd += [
             '-map', '0:v:0', '-map', '1:a:0',
