@@ -1386,7 +1386,8 @@ if _active == 3:
         st.markdown("---")
         st.markdown("#### 👀 자막 미리보기")
 
-        _pv_col1, _pv_col2 = st.columns([1, 1])
+        # 왼쪽: 미리보기 그림 / 오른쪽: 장면별 자막 목록
+        _pv_col1, _pv_col2 = st.columns([1, 1.3])
 
         # 실제로 만들어질 자막 블록을 그대로 씁니다.
         # 대본을 고치면 이 목록이 바로 다시 계산되어 미리보기도 즉시 바뀝니다.
@@ -1429,6 +1430,46 @@ if _active == 3:
                 if _bg_choice != "회색 배경":
                     _pv_bg = _pv_videos[_pv_names.index(_bg_choice)]
 
+            # ── 장면별 자막 — 전부 보여주고 여기서 바로 수정 ──
+            st.markdown("##### 📑 장면별 자막 (여기서 고칠 수 있습니다)")
+            st.caption(
+                "✏️ 고치면 위 대본에도 바로 반영됩니다. "
+                "장면 안에서 줄을 나누려면 **Enter**를 치세요."
+            )
+
+            # 장면 글을 고치면 대본을 다시 만들어 넣습니다.
+            # 한 장면 안의 줄바꿈은 '띄어쓰기 2칸'으로 바꿔서 저장하면
+            # 다시 쪼갤 때 똑같은 장면으로 되돌아옵니다.
+            def _apply_scene_edits():
+                new_blocks = []
+                for _i in range(len(_pv_blocks)):
+                    _v = st.session_state.get(f"scene_{_i}", _pv_blocks[_i])
+                    _v = "\n".join(
+                        ln.strip() for ln in str(_v).splitlines() if ln.strip()
+                    )
+                    if _v.strip():
+                        new_blocks.append(_v.replace("\n", "  "))
+                if new_blocks:
+                    st.session_state['script_textarea'] = "\n".join(new_blocks)
+
+            # 대본이 바뀌었으면 장면 칸들을 새로 채웁니다
+            _scene_sig = "\u0000".join(_pv_blocks)
+            if st.session_state.get('_scene_sig') != _scene_sig:
+                for _i, _b in enumerate(_pv_blocks):
+                    st.session_state[f"scene_{_i}"] = _b
+                st.session_state['_scene_sig'] = _scene_sig
+
+            # 미리보기 그림과 높이를 비슷하게 맞춰 나란히 보이게 합니다
+            with st.container(height=640):
+                for _i, _b in enumerate(_pv_blocks):
+                    _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
+                    st.text_area(
+                        f"{_i + 1}" + ("   ⚠️ 글자가 넘칩니다" if _over else " 번째 장면"),
+                        key=f"scene_{_i}",
+                        height=78,
+                        on_change=_apply_scene_edits,
+                    )
+
         with _pv_col1:
             try:
                 from modules.fonts import render_subtitle_preview, pct_to_margin
@@ -1457,57 +1498,6 @@ if _active == 3:
                     )
             except Exception as e:
                 st.warning(f"⚠️ 미리보기를 만들지 못했습니다: {e}")
-
-        # ── 장면별 자막 — 전부 보여주고 여기서 바로 수정 ──
-        st.markdown("##### 📑 장면별 자막 (여기서 고칠 수 있습니다)")
-
-        # 장면 글을 고치면 대본을 다시 만들어 넣습니다.
-        # 한 장면 안의 줄바꿈은 '띄어쓰기 2칸'으로 바꿔서 저장하면
-        # 다시 쪼갤 때 똑같은 장면으로 되돌아옵니다.
-        def _apply_scene_edits():
-            new_blocks = []
-            for _i in range(len(_pv_blocks)):
-                _v = st.session_state.get(f"scene_{_i}", _pv_blocks[_i])
-                _v = "\n".join(
-                    ln.strip() for ln in str(_v).splitlines() if ln.strip()
-                )
-                if _v.strip():
-                    new_blocks.append(_v.replace("\n", "  "))
-            if new_blocks:
-                st.session_state['script_textarea'] = "\n".join(new_blocks)
-
-        # 대본이 바뀌었으면 장면 칸들을 새로 채웁니다
-        _scene_sig = "\u0000".join(_pv_blocks)
-        if st.session_state.get('_scene_sig') != _scene_sig:
-            for _i, _b in enumerate(_pv_blocks):
-                st.session_state[f"scene_{_i}"] = _b
-            st.session_state['_scene_sig'] = _scene_sig
-
-        _sc_box = st.container(height=min(420, 120 + 86 * len(_pv_blocks)))
-        with _sc_box:
-            for _i, _b in enumerate(_pv_blocks):
-                _c_no, _c_txt = st.columns([1, 9])
-                with _c_no:
-                    st.markdown(
-                        f"<div style='padding-top:26px;text-align:center;"
-                        f"font-weight:700;color:#ff4b4b'>{_i + 1}</div>",
-                        unsafe_allow_html=True,
-                    )
-                with _c_txt:
-                    _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
-                    st.text_area(
-                        f"장면 {_i + 1}" + ("  ⚠️ 글자가 넘칩니다" if _over else ""),
-                        key=f"scene_{_i}",
-                        height=80,
-                        label_visibility="collapsed" if not _over else "visible",
-                        on_change=_apply_scene_edits,
-                    )
-
-        st.caption(
-            "✏️ 고치면 위 대본에도 바로 반영됩니다. "
-            "한 장면 안에서 줄을 나누려면 **줄바꿈(Enter)** 하거나 "
-            "**띄어쓰기 2칸**을 넣으세요."
-        )
 
         st.markdown("---")
 
