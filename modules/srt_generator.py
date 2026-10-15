@@ -35,18 +35,34 @@ def split_into_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def resplit_script_by_sentence(script: str) -> str:
-    """대본을 '문장마다 한 줄'로 다시 정리합니다.
+# 구두점 뒤에서 줄을 바꿉니다.
+#   - 뒤에 공백이나 글 끝이 오는 경우에만 나눕니다.
+#     그래야 "1,000원" "2.5배" 같은 숫자가 쪼개지지 않습니다.
+#   - 구두점은 앞 줄에 그대로 붙여 둡니다.
+_PUNCT_BREAK = re.compile(r'(?<=[,.!?~])(?=\s|$)')
 
-    AI가 여러 문장을 한 문단으로 붙여 놓았을 때,
-    '대본 한 줄 = 자막 한 장면' 을 쓰려면 먼저 줄을 나눠야 합니다.
+
+def resplit_script_by_sentence(script: str, split_commas: bool = True) -> str:
+    """대본을 구두점마다 한 줄로 다시 정리합니다.
+
+    AI가 여러 문장을 한 문단으로 붙여 놓으면
+    '대본 한 줄 = 자막 한 장면'이 제대로 동작하지 않습니다.
+
+    Args:
+        split_commas: True면 쉼표(,)에서도 줄을 바꿉니다.
+            마침표·물음표·느낌표(. ! ?)에서는 항상 바꿉니다.
     """
+    pattern = _PUNCT_BREAK if split_commas else re.compile(r'(?<=[.!?~])(?=\s|$)')
+
     out = []
     for line in str(script).strip().splitlines():
         line = line.strip()
         if not line:
             continue
-        out.extend(split_into_sentences(line))
+        for piece in pattern.split(line):
+            piece = piece.strip()
+            if piece:
+                out.append(piece)
     return "\n".join(out)
 
 

@@ -1265,10 +1265,16 @@ if _active == 3:
 
         col1, col2 = st.columns([3, 2])
 
+        from modules.srt_generator import resplit_script_by_sentence
+
         with col1:
-            # ③탭에서 다른 버전을 고르면 편집창을 그 대본으로 새로 채웁니다
+            # ③탭에서 다른 버전을 고르면 편집창을 그 대본으로 새로 채웁니다.
+            # 이때 구두점( , . ! ? )마다 자동으로 줄을 나눠서 넣습니다.
+            # → '대본 한 줄 = 자막 한 장면'이 바로 맞아떨어집니다.
             if st.session_state.get('_script_loaded') != current_script:
-                st.session_state['script_textarea'] = current_script
+                st.session_state['script_textarea'] = resplit_script_by_sentence(
+                    current_script
+                )
                 st.session_state['_script_loaded'] = current_script
 
             _sc_h1, _sc_h2 = st.columns([2, 1])
@@ -1276,12 +1282,12 @@ if _active == 3:
                 st.markdown("#### 📝 사용할 대본 (수정 가능)")
             with _sc_h2:
                 if st.button(
-                    "✂️ 문장마다 줄바꿈",
+                    "✂️ 구두점마다 줄바꿈",
                     use_container_width=True,
-                    help="한 문단으로 붙어 있는 대본을 문장마다 한 줄로 나눕니다. "
-                         "'대본 한 줄 = 자막 한 장면'과 같이 쓰면 깔끔해집니다.",
+                    help="쉼표·마침표·물음표·느낌표( , . ! ? )마다 줄을 나눕니다. "
+                         "대본을 새로 불러올 때 자동으로 적용되지만, "
+                         "직접 고친 뒤 다시 정리하고 싶을 때 누르세요.",
                 ):
-                    from modules.srt_generator import resplit_script_by_sentence
                     st.session_state['script_textarea'] = resplit_script_by_sentence(
                         st.session_state.get('script_textarea', '')
                     )
