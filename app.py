@@ -1640,7 +1640,19 @@ if _active == 3:
                             st.success(f"✅ 자막 생성 완료! (총 {duration:.1f}초)")
 
                         except Exception as e:
-                            st.error(f"❌ 자막 생성 오류: {e}")
+                            # Streamlit 은 modules/ 안의 모듈을 캐시합니다.
+                            # 앱이 켜진 상태에서 모듈을 고치면 app.py 만 다시 읽고
+                            # 모듈은 옛날 것을 써서 '없는 인자' 오류가 납니다.
+                            if isinstance(e, TypeError) and "unexpected keyword" in str(e):
+                                st.error(
+                                    "❌ **앱을 껐다 켜 주세요.**\n\n"
+                                    "프로그램이 업데이트됐는데 실행 중인 앱이 옛날 코드를 "
+                                    "쓰고 있습니다. 창을 닫고 `run.bat` 을 다시 실행하면 "
+                                    "해결됩니다.\n\n"
+                                    f"(원인: {e})"
+                                )
+                            else:
+                                st.error(f"❌ 자막 생성 오류: {e}")
 
         # ── 결과 표시 ─────────────────────────────────
         if st.session_state.get('audio_path'):
