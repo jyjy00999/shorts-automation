@@ -1406,13 +1406,10 @@ if _active == 3:
                 "지금 설정한 크기·위치 그대로 영상에 들어갑니다."
             )
 
-            _pv_idx = 0
-            if len(_pv_blocks) > 1:
-                _pv_idx = st.slider(
-                    "몇 번째 자막을 볼까요",
-                    min_value=1, max_value=len(_pv_blocks), value=1,
-                    help="대본을 고치면 장면 수도 바로 바뀝니다",
-                ) - 1
+            # 왼쪽 미리보기에 띄울 장면 (아래 목록에서 ▶ 를 누르면 바뀝니다)
+            _pv_idx = max(
+                0, min(st.session_state.get('pv_idx', 0), len(_pv_blocks) - 1)
+            )
 
             # 올린 소재 영상이 있으면 그 위에 얹어서 보여 줍니다
             _pv_videos = [
@@ -1433,14 +1430,15 @@ if _active == 3:
             # ── 장면별 자막 — 전부 보여주고 여기서 바로 수정 ──
             st.markdown("##### 📑 장면별 자막 (여기서 고칠 수 있습니다)")
             st.caption(
-                "✏️ 고치면 위 대본에도 바로 반영됩니다. "
+                "▶ 를 누르면 그 장면이 왼쪽 미리보기에 뜹니다. "
+                "고치면 위 대본에도 바로 반영되고, "
                 "장면 안에서 줄을 나누려면 **Enter**를 치세요."
             )
 
             # 장면 글을 고치면 대본을 다시 만들어 넣습니다.
             # 한 장면 안의 줄바꿈은 '띄어쓰기 2칸'으로 바꿔서 저장하면
             # 다시 쪼갤 때 똑같은 장면으로 되돌아옵니다.
-            def _apply_scene_edits():
+            def _apply_scene_edits(edited: int = None):
                 new_blocks = []
                 for _i in range(len(_pv_blocks)):
                     _v = st.session_state.get(f"scene_{_i}", _pv_blocks[_i])
@@ -1451,6 +1449,13 @@ if _active == 3:
                         new_blocks.append(_v.replace("\n", "  "))
                 if new_blocks:
                     st.session_state['script_textarea'] = "\n".join(new_blocks)
+                # 방금 고친 장면을 왼쪽 미리보기에 띄워 줍니다
+                if edited is not None:
+                    st.session_state['pv_idx'] = max(0, min(edited, len(new_blocks) - 1))
+
+            def _pick_scene(i: int):
+                """▶ 를 누른 장면을 왼쪽 미리보기에 띄웁니다."""
+                st.session_state['pv_idx'] = i
 
             # 장면 칸을 다시 채워야 하는 경우:
             #  1) 대본이 바뀌었을 때
@@ -1472,18 +1477,35 @@ if _active == 3:
             # 미리보기 그림과 높이를 비슷하게 맞춰 나란히 보이게 합니다
             with st.container(height=640):
                 for _i, _b in enumerate(_pv_blocks):
-                    st.text_area(
-                        f"장면 {_i + 1}",          # 화면에는 숨기고 접근성용으로만 둡니다
-                        key=f"scene_{_i}",
-                        height=78,
-                        label_visibility="collapsed",
-                        on_change=_apply_scene_edits,
-                    )
-                    _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
-                    if _over:
-                        st.caption(
-                            f"⚠️ {len(_over[0])}자 — {_fit}자를 넘어 화면 밖으로 잘립니다"
+                    # 칸 높이를 줄 수에 맞춥니다 (2줄이면 2줄 다 보이게)
+                    _n_ln = len(st.session_state.get(f"scene_{_i}", _b).splitlines())
+                    _h = max(68, 46 + 26 * max(_n_ln, 1))
+
+                    _c_btn, _c_txt = st.columns([1, 8])
+                    with _c_btn:
+                        st.button(
+                            "▶",
+                            key=f"pick_{_i}",
+                            help="이 장면을 왼쪽 미리보기에 띄웁니다",
+                            use_container_width=True,
+                            type="primary" if _i == _pv_idx else "secondary",
+                            on_click=_pick_scene,
+                            args=(_i,),
                         )
+                    with _c_txt:
+                        st.text_area(
+                            f"장면 {_i + 1}",      # 화면에는 숨기고 접근성용으로만 둡니다
+                            key=f"scene_{_i}",
+                            height=_h,
+                            label_visibility="collapsed",
+                            on_change=_apply_scene_edits,
+                            kwargs={"edited": _i},
+                        )
+                        _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
+                        if _over:
+                            st.caption(
+                                f"⚠️ {len(_over[0])}자 — {_fit}자를 넘어 잘립니다"
+                            )
 
         with _pv_col1:
             try:
