@@ -1452,9 +1452,19 @@ if _active == 3:
                 if new_blocks:
                     st.session_state['script_textarea'] = "\n".join(new_blocks)
 
-            # 대본이 바뀌었으면 장면 칸들을 새로 채웁니다
+            # 장면 칸을 다시 채워야 하는 경우:
+            #  1) 대본이 바뀌었을 때
+            #  2) 칸이 비어 있을 때 ← 중요
+            #     scene_* 는 '위젯 key' 라서 다른 탭에 갔다 오면 Streamlit이
+            #     지워 버립니다. 그런데 비교용 _scene_sig 는 일반 key 라 살아남아
+            #     '안 바뀌었다'고 판단해 다시 안 채우면 칸이 전부 비어 버립니다.
+            #     (그 상태에서 하나라도 고치면 나머지 장면이 다 날아갑니다)
             _scene_sig = "\u0000".join(_pv_blocks)
-            if st.session_state.get('_scene_sig') != _scene_sig:
+            _missing = any(
+                f"scene_{_i}" not in st.session_state
+                for _i in range(len(_pv_blocks))
+            )
+            if _missing or st.session_state.get('_scene_sig') != _scene_sig:
                 for _i, _b in enumerate(_pv_blocks):
                     st.session_state[f"scene_{_i}"] = _b
                 st.session_state['_scene_sig'] = _scene_sig
@@ -1462,13 +1472,18 @@ if _active == 3:
             # 미리보기 그림과 높이를 비슷하게 맞춰 나란히 보이게 합니다
             with st.container(height=640):
                 for _i, _b in enumerate(_pv_blocks):
-                    _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
                     st.text_area(
-                        f"{_i + 1}" + ("   ⚠️ 글자가 넘칩니다" if _over else " 번째 장면"),
+                        f"장면 {_i + 1}",          # 화면에는 숨기고 접근성용으로만 둡니다
                         key=f"scene_{_i}",
                         height=78,
+                        label_visibility="collapsed",
                         on_change=_apply_scene_edits,
                     )
+                    _over = [ln for ln in _b.split("\n") if len(ln) > _fit]
+                    if _over:
+                        st.caption(
+                            f"⚠️ {len(_over[0])}자 — {_fit}자를 넘어 화면 밖으로 잘립니다"
+                        )
 
         with _pv_col1:
             try:
