@@ -224,6 +224,7 @@ def calculate_timings(
     min_display_sec: float = 0.8,
     gap_between_blocks_sec: float = 0.08,
     lead_sec: float = 0.10,
+    audio_path: str = "",
 ) -> list[tuple[float, float]]:
     """
     각 자막 블록의 시작/끝 시간을 계산합니다.
@@ -261,6 +262,53 @@ def calculate_timings(
         return [(round(i * d, 3), round((i + 1) * d, 3)) for i in range(n)]
 
     weights = [speech_weight(b) for b in blocks]
+
+    # ── 음성이 있으면 '실제로 소리 나는 구간'에 맞춥니다 ──
+    #    사람은 문장 사이에서 쉬는데 그 쉼은 글자가 0개입니다.
+    #    글자를 '소리 나는 시간'에만 배분하면 쉼이 자막 경계에 놓입니다.
+    if audio_path:
+        try:
+            from modules.audio_align import (
+                detect_speech_segments, speech_to_wall, speech_total,
+                pause_starts, snap_to_pause,
+            )
+            segs = detect_speech_segments(audio_path)
+            if segs and len(segs) > 0:
+                sp_total = speech_total(segs)
+                if sp_total > 0.5:
+                    tw = sum(weights)
+                    pauses = pause_starts(segs)
+
+                    # 1) 각 자막이 '시작하는' 시각을 소리 시간 기준으로 계산
+                    starts = []
+                    acc = 0.0
+                    for w in weights:
+                        starts.append(speech_to_wall(segs, acc / tw * sp_total))
+                        acc += w
+
+                    # 2) 문장이 끝나는 자막 경계는 근처의 '쉼'에 붙입니다
+                    #    (사람이 가장 크게 느끼는 어긋남이라서 우선 맞춥니다)
+                    snapped = [segs[0][0]]
+                    for i in range(1, n):
+                        t = snap_to_pause(starts[i], pauses)
+                        # 앞 자막보다 뒤여야 합니다
+                        snapped.append(max(t, snapped[-1] + 0.25))
+
+                    # 3) 읽을 시간을 주려고 살짝 먼저 띄웁니다
+                    out = []
+                    for i in range(n):
+                        s = max(0.0, snapped[i] - lead_sec)
+                        e = total if i == n - 1 else max(
+                            s + 0.25, snapped[i + 1] - lead_sec
+                        )
+                        out.append((round(s, 3), round(e, 3)))
+
+                    logger.info(
+                        f"음성 정렬 사용: 발화 {len(segs)}구간, 쉼 {len(pauses)}곳"
+                    )
+                    return out
+        except Exception as e:
+            logger.warning(f"음성 정렬 실패, 글자 수 비례로 진행: {e}")
 
     # ── 최소 시간에 걸리는 블록을 고정하고 나머지를 비례 배분 ──
     #    (고정된 블록이 생기면 남은 시간이 줄어드니 반복합니다)
@@ -319,6 +367,8 @@ def generate_srt(
     max_chars_per_line: int = 18,
     max_lines_per_block: int = 2,
     respect_line_breaks: bool = True,
+    audio_path: str = "",
+    sync_offset_sec: float = 0.0,
 ) -> str:
     """
     대본과 오디오 길이를 기반으로 SRT 파일을 생성합니다.
@@ -349,7 +399,18 @@ def generate_srt(
         return output_path
 
     # 2. 타이밍 계산
-    timings = calculate_timings(blocks, total_duration_sec)
+    timings = calculate_timings(blocks, total_duration_sec, audio_path=audio_path)
+
+    # 2-1. 사용자가 고른 미세조정 (음수 = 자막을 더 일찍)
+    if sync_offset_sec:
+        timings = [
+            (
+                max(0.0, round(s + sync_offset_sec, 3)),
+                max(0.05, round(e + sync_offset_sec, 3)),
+            )
+            for s, e in timings
+        ]
+        logger.info(f"자막 싱크 보정: {sync_offset_sec:+.2f}초")
 
     # 3. SRT 파일 작성
     srt_content = []

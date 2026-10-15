@@ -1370,6 +1370,17 @@ if _active == 3:
                 help="숫자가 클수록 자막이 위로 올라갑니다",
             )
 
+            sync_offset = st.slider(
+                "자막 싱크 보정 (초)",
+                min_value=-1.5, max_value=1.5, value=0.0, step=0.05,
+                help="자막이 늦게 뜨면 왼쪽(−)으로, 너무 빨리 뜨면 오른쪽(+)으로. "
+                     "기본값 0이면 음성을 분석해 자동으로 맞춥니다.",
+            )
+            if sync_offset < 0:
+                st.caption(f"↳ 자막을 **{abs(sync_offset):.2f}초 더 일찍** 띄웁니다")
+            elif sync_offset > 0:
+                st.caption(f"↳ 자막을 **{sync_offset:.2f}초 더 늦게** 띄웁니다")
+
         # ⚠️ Streamlit은 화면에 안 그려진 위젯의 key를 session_state에서 지웁니다.
         #    ⑤ 영상 만들기 탭으로 넘어가면 위 슬라이더들이 사라져서
         #    설정이 기본값으로 되돌아갑니다.
@@ -1611,6 +1622,9 @@ if _active == 3:
                                 max_chars_per_line=max_chars,
                                 max_lines_per_block=max_lines_block,
                                 respect_line_breaks=one_line_per_scene,
+                                # 음성을 직접 들어 보고 쉬는 구간에 맞춥니다
+                                audio_path=audio_path,
+                                sync_offset_sec=sync_offset,
                             )
                             st.session_state['srt_path'] = srt_path
 
