@@ -1486,7 +1486,6 @@ if _active == 3:
                         st.button(
                             "▶",
                             key=f"pick_{_i}",
-                            help="이 장면을 왼쪽 미리보기에 띄웁니다",
                             use_container_width=True,
                             type="primary" if _i == _pv_idx else "secondary",
                             on_click=_pick_scene,
