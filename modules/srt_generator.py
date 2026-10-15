@@ -188,60 +188,110 @@ def split_script_into_lines(
     return blocks
 
 
+def speech_weight(block: str) -> float:
+    """이 자막을 소리 내어 읽는 데 걸리는 '몫'을 어림합니다.
+
+    - 공백은 발음되지 않으므로 글자 수에서 뺍니다
+    - 쉼표·마침표 뒤에는 TTS가 잠깐 쉬므로 그만큼 몫을 더해 줍니다
+      (이걸 빼먹으면 문장이 끝나는 자막마다 조금씩 빨라집니다)
+    """
+    t = block.replace('\n', '')
+    w = float(len(t.replace(' ', '')))
+    w += t.count(',') * 1.5
+    w += sum(t.count(c) for c in '.!?~') * 3.0
+    return max(w, 1.0)
+
+
 def calculate_timings(
     blocks: list[str],
     total_duration_sec: float,
-    min_display_sec: float = 1.0,
-    gap_between_blocks_sec: float = 0.1,
+    min_display_sec: float = 0.8,
+    gap_between_blocks_sec: float = 0.08,
+    lead_sec: float = 0.10,
 ) -> list[tuple[float, float]]:
     """
     각 자막 블록의 시작/끝 시간을 계산합니다.
 
-    글자 수에 비례하여 시간을 배분합니다.
-    (글자가 많은 블록은 더 오래 표시)
+    ⚠️ 싱크가 밀리지 않게 하는 것이 핵심입니다.
+    예전 방식은 짧은 블록에 '최소 표시 시간'을 적용하면서
+    그만큼을 뒤쪽에서 빼앗지 않아, 뒤로 갈수록 자막이 늦어졌습니다
+    (30초 영상에서 1초 넘게 밀림).
+
+    지금은 '최소 시간에 걸리는 블록'을 먼저 고정해 두고
+    남은 시간만 나머지에 비례 배분합니다. 그래서 길이의 합이
+    오디오 길이와 정확히 일치하고, 밀림이 생기지 않습니다.
 
     Args:
         blocks: 자막 블록 리스트
         total_duration_sec: 전체 오디오 길이 (초)
         min_display_sec: 블록당 최소 표시 시간 (초)
-        gap_between_blocks_sec: 블록 사이 간격 (초)
+        gap_between_blocks_sec: 자막이 바뀔 때 눈에 보이는 짧은 틈.
+            다음 자막의 '시작'은 밀지 않고 앞 자막의 '끝'만 당깁니다.
+        lead_sec: 자막을 소리보다 이만큼 먼저 띄웁니다.
+            (읽을 시간을 주면 훨씬 자연스럽습니다)
 
     Returns:
         [(start_sec, end_sec), ...] 타이밍 리스트
     """
-    if not blocks:
+    n = len(blocks)
+    if n == 0:
         return []
 
-    # 각 블록의 글자 수 계산 (줄바꿈 제외)
-    char_counts = [len(b.replace('\n', '')) for b in blocks]
-    total_chars = sum(char_counts)
+    total = max(float(total_duration_sec), 0.1)
 
-    # 사용 가능한 총 시간 계산 (갭 시간 제외)
-    total_gap = gap_between_blocks_sec * (len(blocks) - 1)
-    available_time = max(total_duration_sec - total_gap, len(blocks) * min_display_sec)
+    # 최소 시간조차 못 채울 만큼 자막이 많으면 그냥 균등 분배
+    if n * min_display_sec >= total:
+        d = total / n
+        return [(round(i * d, 3), round((i + 1) * d, 3)) for i in range(n)]
 
+    weights = [speech_weight(b) for b in blocks]
+
+    # ── 최소 시간에 걸리는 블록을 고정하고 나머지를 비례 배분 ──
+    #    (고정된 블록이 생기면 남은 시간이 줄어드니 반복합니다)
+    fixed: set[int] = set()
+    while len(fixed) < n:
+        rem_time = total - min_display_sec * len(fixed)
+        rem_w = sum(w for i, w in enumerate(weights) if i not in fixed)
+        if rem_w <= 0:
+            break
+        newly = {
+            i for i in range(n)
+            if i not in fixed
+            and weights[i] / rem_w * rem_time < min_display_sec
+        }
+        if not newly:
+            break
+        fixed |= newly
+
+    rem_time = total - min_display_sec * len(fixed)
+    rem_w = sum(w for i, w in enumerate(weights) if i not in fixed)
+
+    durations = [
+        min_display_sec if i in fixed
+        else (weights[i] / rem_w * rem_time if rem_w > 0 else 0.0)
+        for i in range(n)
+    ]
+
+    # ── 누적해서 시작 시각 만들기 (길이의 합 = 오디오 길이) ──
+    starts = []
+    cursor = 0.0
+    for d in durations:
+        starts.append(max(0.0, cursor - lead_sec))
+        cursor += d
+
+    # ── 끝 시각: 다음 자막 시작을 넘지 않게 ────────
+    #    (겹치면 두 자막이 같이 떠서 깜빡입니다)
     timings = []
-    current_time = 0.0
-
-    for i, (block, char_count) in enumerate(zip(blocks, char_counts)):
-        # 이 블록에 배분된 시간 (글자 수 비율 기반)
-        if total_chars > 0:
-            allocated_time = (char_count / total_chars) * available_time
+    for i in range(n):
+        start = starts[i]
+        if i == n - 1:
+            end = total                       # 마지막은 오디오 끝까지
         else:
-            allocated_time = available_time / len(blocks)
-
-        # 최소 표시 시간 보장
-        display_time = max(allocated_time, min_display_sec)
-
-        start = current_time
-        end = current_time + display_time
-
-        # 마지막 블록은 오디오 끝까지
-        if i == len(blocks) - 1:
-            end = total_duration_sec
-
+            nxt = starts[i + 1]
+            # 자막이 바뀌는 게 보이도록 짧은 틈을 둡니다
+            end = max(start + 0.25, nxt - gap_between_blocks_sec)
+            end = min(end, nxt)               # 절대 겹치지 않게
         timings.append((round(start, 3), round(end, 3)))
-        current_time = end + gap_between_blocks_sec
 
     return timings
 
