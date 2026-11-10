@@ -187,10 +187,11 @@ def gemini_generate(
     last_err = None
     bad_keys = set()        # 키 자체가 틀린 경우 (다음 모델에서 또 시도하지 않게)
     exhausted = set()       # 하루 한도를 다 쓴 키
+    unpaid = set()          # 결제(선불 크레딧)가 바닥난 프로젝트의 키
 
     for m in chain:
         for idx, key in enumerate(keys):
-            if idx in bad_keys or idx in exhausted:
+            if idx in bad_keys or idx in exhausted or idx in unpaid:
                 continue
             try:
                 logger.info(
@@ -215,6 +216,13 @@ def gemini_generate(
                     logger.warning(f"키 {idx+1}번 한도 초과 → 다음 키")
                     exhausted.add(idx)
                     continue
+                # 402 = 결제 문제. 이 키가 속한 프로젝트는 어떤 모델로도 안 되니
+                # 다른 모델로 또 시도하지 않고 바로 건너뜁니다.
+                if "[402]" in msg or "prepayment credits" in msg.lower() \
+                        or "billing" in msg.lower():
+                    logger.warning(f"키 {idx+1}번 결제 크레딧 소진 → 건너뜁니다")
+                    unpaid.add(idx)
+                    continue
                 if any(c in msg for c in ("[404]", "[403]")):
                     # 이 모델을 못 쓰는 것뿐이니 키는 살려 두고 다음 모델로
                     logger.warning(f"{m} 사용 불가 → 다음 모델: {msg[:100]}")
@@ -227,6 +235,19 @@ def gemini_generate(
         raise ProviderError(
             "❌ 넣으신 Gemini 키가 모두 올바르지 않습니다.\n"
             "→ aistudio.google.com/apikey 에서 다시 확인해 주세요."
+        )
+    if unpaid:
+        raise ProviderError(
+            f"💳 **Gemini 결제 크레딧이 바닥났습니다** (키 {len(unpaid)}개).\n\n"
+            "이 키들은 **결제가 연결된 구글 프로젝트**에 속해 있습니다. "
+            "결제를 붙이면 무료 할당량이 적용되지 않고 선불 크레딧을 쓰는데, "
+            "그게 다 소진된 상태입니다.\n\n"
+            "**해결 방법 (셋 중 하나)**\n"
+            "1. 무료로 계속 쓰기 — aistudio.google.com/apikey 에서 "
+            "**결제가 연결되지 않은 새 프로젝트**를 만들고 거기서 키를 새로 발급받아 "
+            "사이드바에 넣으세요. (가장 추천)\n"
+            "2. ai.studio/projects 에서 크레딧을 충전하세요.\n"
+            "3. 사이드바에서 **Claude(유료)** 로 바꿔서 진행하세요."
         )
     if exhausted:
         raise ProviderError(
