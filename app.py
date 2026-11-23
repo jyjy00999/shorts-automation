@@ -1472,11 +1472,6 @@ if _active == 3:
 
             # ── 장면별 자막 — 전부 보여주고 여기서 바로 수정 ──
             st.markdown("##### 📑 장면별 자막 (여기서 고칠 수 있습니다)")
-            st.caption(
-                "▶ 를 누르면 그 장면이 왼쪽 미리보기에 뜹니다. "
-                "고치면 위 대본에도 바로 반영되고, "
-                "장면 안에서 줄을 나누려면 **Enter**를 치세요."
-            )
 
             # 장면 글을 고치면 대본을 다시 만들어 넣습니다.
             # 한 장면 안의 줄바꿈은 '띄어쓰기 2칸'으로 바꿔서 저장하면
@@ -1520,9 +1515,10 @@ if _active == 3:
             # 미리보기 그림과 높이를 비슷하게 맞춰 나란히 보이게 합니다
             with st.container(height=640):
                 for _i, _b in enumerate(_pv_blocks):
-                    # 칸 높이를 줄 수에 맞춥니다 (2줄이면 2줄 다 보이게)
+                    # 칸 높이를 글자 줄 수에 딱 맞춥니다.
+                    # (68px 이 Streamlit text_area 의 최소 높이라 더는 못 줄입니다)
                     _n_ln = len(st.session_state.get(f"scene_{_i}", _b).splitlines())
-                    _h = max(68, 46 + 26 * max(_n_ln, 1))
+                    _h = max(68, 22 + 24 * max(_n_ln, 1))
 
                     _c_btn, _c_txt = st.columns([1, 8])
                     with _c_btn:
