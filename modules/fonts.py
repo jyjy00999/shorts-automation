@@ -195,6 +195,19 @@ def subtitle_filter(
     return filt
 
 
+# 미리보기 배경색 (자막이 어떤 화면에서 잘 보이는지 확인용)
+BG_COLORS = {
+    "회색 배경":   "0x3a3a44",
+    "검정 배경":   "0x0f0f12",
+    "흰색 배경":   "0xf2f2f4",
+    "노란 배경":   "0xf2c230",
+    "파란 배경":   "0x2b5aa6",
+    "초록 배경":   "0x2f7d55",
+    "분홍 배경":   "0xe79ab4",
+    "주황 배경":   "0xe8762c",
+}
+
+
 def render_subtitle_preview(
     text: str,
     out_path: str,
@@ -204,6 +217,7 @@ def render_subtitle_preview(
     bg_seek: float = 1.0,
     width: int = 540,
     height: int = 960,
+    bg_color: str = "0x3a3a44",
 ) -> str:
     """자막이 화면 어디에 어떤 크기로 올라가는지 미리보기 PNG를 만듭니다.
 
@@ -242,10 +256,10 @@ def render_subtitle_preview(
             "-frames:v", "1", out_path,
         ]
     else:
-        # 영상이 없으면 눈금 있는 회색 배경 위에 그립니다
+        # 영상이 없으면 고른 색 배경 위에 그립니다
         cmd = [
             "ffmpeg", "-y", "-v", "error",
-            "-f", "lavfi", "-i", f"color=c=0x3a3a44:s={width}x{height}:d=1",
+            "-f", "lavfi", "-i", f"color=c={bg_color}:s={width}x{height}:d=1",
             "-vf", vf, "-frames:v", "1", out_path,
         ]
 

@@ -1444,34 +1444,31 @@ if _active == 3:
         ) or ["자막이 여기에 표시됩니다"]
 
         with _pv_col2:
-            st.caption(
-                f"대본이 **자막 {len(_pv_blocks)}장면**으로 나뉩니다. "
-                "지금 설정한 크기·위치 그대로 영상에 들어갑니다."
-            )
-
             # 왼쪽 미리보기에 띄울 장면 (아래 목록에서 ▶ 를 누르면 바뀝니다)
             _pv_idx = max(
                 0, min(st.session_state.get('pv_idx', 0), len(_pv_blocks) - 1)
             )
 
-            # 올린 소재 영상이 있으면 그 위에 얹어서 보여 줍니다
+            # 배경: 색 또는 올린 소재 영상의 한 장면
+            from modules.fonts import BG_COLORS
+
             _pv_videos = [
                 p for p in st.session_state.get('source_videos', [])
                 if os.path.exists(p)
             ]
+            _pv_names = [Path(p).name for p in _pv_videos]
+            _bg_choice = st.selectbox(
+                "배경",
+                list(BG_COLORS.keys()) + _pv_names,
+                label_visibility="collapsed",
+            )
             _pv_bg = ""
-            if _pv_videos:
-                _pv_names = [Path(p).name for p in _pv_videos]
-                _bg_choice = st.selectbox(
-                    "배경",
-                    ["회색 배경"] + _pv_names,
-                    help="올린 영상 위에 얹어 보면 더 정확합니다",
-                )
-                if _bg_choice != "회색 배경":
-                    _pv_bg = _pv_videos[_pv_names.index(_bg_choice)]
+            _pv_color = BG_COLORS.get(_bg_choice, "0x3a3a44")
+            if _bg_choice in _pv_names:
+                _pv_bg = _pv_videos[_pv_names.index(_bg_choice)]
 
             # ── 장면별 자막 — 전부 보여주고 여기서 바로 수정 ──
-            st.markdown("##### 📑 장면별 자막 (여기서 고칠 수 있습니다)")
+            st.markdown("##### 📑 장면별 자막")
 
             # 장면 글을 고치면 대본을 다시 만들어 넣습니다.
             # 한 장면 안의 줄바꿈은 '띄어쓰기 2칸'으로 바꿔서 저장하면
@@ -1558,6 +1555,7 @@ if _active == 3:
                     font_size=sub_font_size,
                     margin_v=pct_to_margin(sub_pos_pct),
                     bg_video=_pv_bg,
+                    bg_color=_pv_color,
                 )
                 st.image(_pv_out, use_container_width=True)
 
