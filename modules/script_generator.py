@@ -10,18 +10,50 @@ import anthropic
 
 
 # ── 쇼핑 쇼츠 대본 구조 (업계 표준) ─────────────────
-# 1. 후크(Hook)     0~3초   : 시청자를 멈추게 하는 강렬한 첫 문장
-# 2. 공감(Empathy)  3~8초   : 시청자의 고통/욕망에 공감
-# 3. 소개(Intro)    8~15초  : 상품 자연스럽게 등장
-# 4. 혜택(Benefit)  15~40초: 핵심 기능/혜택 2~3가지 설명
-# 5. CTA(Action)   40~60초 : 구매/저장/클릭 유도
+# 후크 → 공감 → 소개 → 혜택 → CTA 다섯 토막으로 나눕니다.
+# 아래 비율로 목표 길이에 맞춰 시간을 자동 배분합니다.
+SECTION_RATIO = [
+    ("hook",    "후크",  0.12, "3초 안에 스크롤을 멈추게 하기"),
+    ("empathy", "공감",  0.16, "시청자의 공감 유발"),
+    ("intro",   "소개",  0.18, "상품을 자연스럽게 소개"),
+    ("benefit", "혜택",  0.36, "핵심 혜택 2~3가지 전달"),
+    ("cta",     "CTA",   0.18, "구매/저장/팔로우 유도"),
+]
 
+# 한국어 TTS 발화 속도 (공백 포함 글자 수 기준).
+# 실제 음성 파일로 측정한 값입니다: 157자 / 18.24초 = 8.6자/초 (말하기 속도 1.05).
+CHARS_PER_SEC = 8.6
+
+DURATION_CHOICES = [15, 20, 25, 30, 45, 60]
+
+
+def section_plan(total_sec: int) -> list:
+    """목표 길이에 맞춰 각 섹션의 시작·끝 초를 계산합니다.
+
+    Returns:
+        [(key, 한글이름, 시작초, 끝초, 목표), ...]
+    """
+    out, t = [], 0
+    for i, (key, label, ratio, goal) in enumerate(SECTION_RATIO):
+        end = total_sec if i == len(SECTION_RATIO) - 1 else round(
+            total_sec * sum(r for _, _, r, _ in SECTION_RATIO[:i + 1])
+        )
+        end = max(end, t + 1)          # 최소 1초는 확보
+        out.append((key, label, t, end, goal))
+        t = end
+    return out
+
+
+def target_chars(total_sec: int) -> tuple:
+    """이 길이에 맞는 대본 글자 수 범위 (공백 포함)."""
+    mid = total_sec * CHARS_PER_SEC
+    return int(mid * 0.92), int(mid * 1.08)
+
+
+# 예전 코드 호환용 (60초 기준)
 SHORTS_STRUCTURE = {
-    "hook": {"duration": "0~3초", "goal": "3초 안에 스크롤을 멈추게 하기"},
-    "empathy": {"duration": "3~8초", "goal": "시청자의 공감 유발"},
-    "intro": {"duration": "8~15초", "goal": "상품을 자연스럽게 소개"},
-    "benefit": {"duration": "15~40초", "goal": "핵심 혜택 2~3가지 전달"},
-    "cta": {"duration": "40~60초", "goal": "구매/저장/팔로우 유도"},
+    k: {"duration": f"{s}~{e}초", "goal": g}
+    for k, _, s, e, g in section_plan(60)
 }
 
 # ── 타겟별 말투 가이드 ────────────────────────────
@@ -40,6 +72,7 @@ def build_script_prompt(
     video_analysis: dict,
     target_audience: str,
     additional_info: str = "",
+    target_duration_sec: int = 30,
 ) -> str:
     """
     대본 생성용 프롬프트를 구성합니다.
@@ -47,6 +80,15 @@ def build_script_prompt(
     """
     # 타겟별 말투 가이드 선택
     tone = TONE_GUIDES.get(target_audience, TONE_GUIDES["일반 소비자"])
+
+    # 목표 길이에 맞춘 섹션 시간표와 글자 수
+    plan = section_plan(target_duration_sec)
+    lo, hi = target_chars(target_duration_sec)
+    plan_text = " → ".join(f"{lbl}({s}~{e}초)" for _, lbl, s, e, _ in plan)
+    sec_lines = "\n".join(
+        f'   - {lbl} ({s}~{e}초, 약 {int((e - s) * CHARS_PER_SEC)}자): {goal}'
+        for _, lbl, s, e, goal in plan
+    )
 
     # 참고 영상에서 추출한 오프닝 후크 샘플
     sample_hooks = video_analysis.get('summary', {}).get('sample_hooks', [])
@@ -102,8 +144,11 @@ def build_script_prompt(
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📝 대본 작성 규칙
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. 총 길이: 45~60초 분량 (읽기 속도 기준 약 180~220자)
-2. 구조: Hook(0~3초) → Empathy(3~8초) → Intro(8~15초) → Benefit(15~40초) → CTA(40~60초)
+1. ⏱️ **총 길이: 정확히 {target_duration_sec}초**
+   전체 대본은 공백 포함 **{lo}~{hi}자**로 쓰세요. 이 글자 수를 반드시 지키세요.
+   (한국어 음성은 1초에 약 {CHARS_PER_SEC}자를 읽습니다. 글자가 넘치면 영상이 길어집니다)
+2. 구조와 섹션별 분량:
+{sec_lines}
 3. 첫 문장(후크)은 반드시 시청자가 스크롤을 멈추게 해야 합니다
 4. 자연스러운 구어체로 작성 (읽는 글이 아닌 말하는 글)
 5. 문장은 짧고 임팩트 있게 (한 문장 15자 이하 권장)
@@ -124,14 +169,14 @@ def build_script_prompt(
       "hook_type": "후킹 유형 (예: 질문형, 공감형, 숫자형 등)",
       "hook_angle": "이 버전의 후킹 앵글 설명",
       "script": {{
-        "hook": "후크 대사 (0~3초)",
-        "empathy": "공감 대사 (3~8초)",
-        "intro": "상품 소개 대사 (8~15초)",
-        "benefit": "혜택 설명 대사 (15~40초)",
-        "cta": "CTA 대사 (40~60초)"
+        "hook": "후크 대사 ({plan[0][2]}~{plan[0][3]}초)",
+        "empathy": "공감 대사 ({plan[1][2]}~{plan[1][3]}초)",
+        "intro": "상품 소개 대사 ({plan[2][2]}~{plan[2][3]}초)",
+        "benefit": "혜택 설명 대사 ({plan[3][2]}~{plan[3][3]}초)",
+        "cta": "CTA 대사 ({plan[4][2]}~{plan[4][3]}초)"
       }},
-      "full_script": "위 섹션을 자연스럽게 이어붙인 전체 대본",
-      "estimated_duration_sec": 예상 초수,
+      "full_script": "위 섹션을 자연스럽게 이어붙인 전체 대본 (공백 포함 {lo}~{hi}자)",
+      "estimated_duration_sec": {target_duration_sec},
       "key_emotion": "핵심 감성 키워드"
     }},
     ...
@@ -153,6 +198,7 @@ def generate_scripts(
     model: str = "claude-sonnet-5",
     provider: str = "",        # "gemini"(무료) 또는 "claude"(유료)
     gemini_key = "",   # 키 하나(str) 또는 여러 개(list)
+    target_duration_sec: int = 30,
 ) -> dict:
     """
     AI를 호출하여 쇼핑 쇼츠 대본 3가지 버전을 생성합니다.
@@ -187,6 +233,7 @@ def generate_scripts(
         video_analysis=video_analysis,
         target_audience=target_audience,
         additional_info=additional_info,
+        target_duration_sec=target_duration_sec,
     )
 
     # ══ Gemini (무료 할당량) ══════════════════════

@@ -657,6 +657,30 @@ if _active == 0:
         )
         st.session_state['target_audience'] = target_audience
 
+        # ── 영상 길이 ─────────────────────────────
+        from modules.script_generator import (
+            DURATION_CHOICES, section_plan, target_chars,
+        )
+        _dur_labels = {d: f"{d}초" for d in DURATION_CHOICES}
+        target_duration = st.radio(
+            "⏱️ 쇼츠 길이",
+            DURATION_CHOICES,
+            index=DURATION_CHOICES.index(30),
+            format_func=lambda d: _dur_labels[d],
+            horizontal=True,
+            help="고른 길이에 맞춰 대본 분량을 조절합니다",
+        )
+        st.session_state['target_duration'] = target_duration
+
+        _lo, _hi = target_chars(target_duration)
+        st.caption(
+            f"↳ 대본 분량 약 **{_lo}~{_hi}자** · "
+            + " → ".join(
+                f"{lbl} {s}~{e}초"
+                for _, lbl, s, e, _ in section_plan(target_duration)
+            )
+        )
+
         additional_info = st.text_area(
             "추가 상품 정보 (선택)",
             height=80,
@@ -888,6 +912,7 @@ if _active == 0:
                             additional_info=additional_info,
                             provider=ai_provider,
                             gemini_key=gemini_keys,
+                            target_duration_sec=target_duration,
                         )
                         st.session_state['scripts_data'] = script_result
                         st.success("✅ 대본 생성 완료!")
@@ -1013,6 +1038,7 @@ def regenerate_scripts(api_key: str, provider: str = "", g_key: str = "") -> boo
                 additional_info=st.session_state.get('additional_info', ''),
                 provider=provider,
                 gemini_key=g_key,
+                target_duration_sec=st.session_state.get('target_duration', 30),
             )
             st.session_state['scripts_data'] = result
             st.session_state['selected_script'] = ''   # 이전 선택 해제
@@ -1102,12 +1128,18 @@ if _active == 2:
                         with col2:
                             st.markdown("**📋 섹션별 구분:**")
                             script_parts = script.get('script', {})
+                            # 고른 길이에 맞춰 섹션 시간표를 그립니다
+                            from modules.script_generator import section_plan
+                            _icons = {
+                                'hook': '🎣', 'empathy': '🤝', 'intro': '📦',
+                                'benefit': '✨', 'cta': '👆',
+                            }
                             sections = [
-                                ("🎣 후크 (0~3초)", script_parts.get('hook', '')),
-                                ("🤝 공감 (3~8초)", script_parts.get('empathy', '')),
-                                ("📦 소개 (8~15초)", script_parts.get('intro', '')),
-                                ("✨ 혜택 (15~40초)", script_parts.get('benefit', '')),
-                                ("👆 CTA (40~60초)", script_parts.get('cta', '')),
+                                (f"{_icons.get(k, '•')} {lbl} ({s}~{e}초)",
+                                 script_parts.get(k, ''))
+                                for k, lbl, s, e, _ in section_plan(
+                                    st.session_state.get('target_duration', 30)
+                                )
                             ]
                             for section_name, section_text in sections:
                                 with st.expander(section_name):
