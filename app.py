@@ -1995,7 +1995,17 @@ if _active == 4:
 
             # ── 컷 편집 세기 ───────────────────────
             st.markdown("**✂️ 컷 바꾸는 속도**")
-            from modules.clip_editor import CUT_SPEED_PRESETS
+            # 실행 중인 앱이 옛날 모듈을 들고 있어도 화면이 깨지지 않게
+            # 값을 여기에도 적어 둡니다 (모듈에 있으면 그걸 씁니다)
+            CUT_SPEED_PRESETS = {
+                "아주 빠르게": 1.4, "빠르게": 1.9, "보통": 2.6, "느리게": 3.6,
+            }
+            try:
+                from modules.clip_editor import CUT_SPEED_PRESETS as _PRESETS
+                CUT_SPEED_PRESETS = _PRESETS
+                _cut_speed_ok = True
+            except ImportError:
+                _cut_speed_ok = False
 
             cut_speed = st.select_slider(
                 "컷 속도",
@@ -2008,6 +2018,14 @@ if _active == 4:
                 f"한 컷을 최대 **{max_cut_sec:.1f}초**까지만 보여 주고 화면을 바꿉니다. "
                 "자막 한 줄이 이보다 길면 그 줄 안에서도 화면이 한 번 더 바뀝니다."
             )
+            if not _cut_speed_ok:
+                st.warning(
+                    "⚠️ **앱을 다시 켜 주세요.** 프로그램은 업데이트됐는데 "
+                    "실행 중인 앱이 아직 옛날 코드를 쓰고 있어, 지금은 이 설정이 "
+                    "영상에 반영되지 않습니다.\n\n"
+                    "• 웹(스트림릿 클라우드): 오른쪽 아래 **Manage app → ⋮ → Reboot app**\n"
+                    "• 내 컴퓨터: 검은 창을 닫고 `run.bat` 다시 실행"
+                )
 
             # ── 장면 매칭 방식 ─────────────────────
             st.markdown("**🎯 장면 고르는 방식**")
@@ -2118,7 +2136,19 @@ if _active == 4:
                             st.rerun()
                         except Exception as e:
                             bar.empty()
-                            st.error(f"❌ 컷편집 실패: {e}")
+                            # 실행 중인 앱이 옛날 모듈을 쓰고 있을 때 나는 오류
+                            if isinstance(e, TypeError) and "unexpected keyword" in str(e):
+                                st.error(
+                                    "❌ **앱을 다시 켜 주세요.**\n\n"
+                                    "프로그램은 업데이트됐는데 실행 중인 앱이 옛날 코드를 "
+                                    "쓰고 있습니다.\n\n"
+                                    "• 웹(스트림릿 클라우드): 오른쪽 아래 "
+                                    "**Manage app → ⋮ → Reboot app**\n"
+                                    "• 내 컴퓨터: 검은 창을 닫고 `run.bat` 다시 실행\n\n"
+                                    f"(원인: {e})"
+                                )
+                            else:
+                                st.error(f"❌ 컷편집 실패: {e}")
 
         # ── 슬라이드쇼 실행 ───────────────────────────
         else:
