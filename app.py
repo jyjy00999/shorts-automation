@@ -1777,10 +1777,12 @@ if _active == 4:
         use_imgs_ui = []
         img_every = 3
         smart_match = True
+        max_cut_sec = 2.6
 
         if mode == "컷편집 (영상·이미지)":
             st.caption(
-                "**자막 한 줄마다 화면 하나씩** 배정해 이어붙입니다. "
+                "**대본 한 줄마다 화면 하나씩** 배정해 이어붙입니다. "
+                "한 줄이 길면 그 안에서도 컷을 나눠 화면이 계속 바뀝니다. "
                 "원본 소리는 버리고 생성한 음성을 입힙니다. "
                 "영상만 넣으면 영상만, 이미지만 넣으면 이미지만, 둘 다 넣으면 섞어서 만듭니다."
             )
@@ -1991,27 +1993,50 @@ if _active == 4:
                 if _boxes:
                     st.success(f"✅ 영상 {len(_boxes)}개에서 자막을 지웁니다")
 
+            # ── 컷 편집 세기 ───────────────────────
+            st.markdown("**✂️ 컷 바꾸는 속도**")
+            from modules.clip_editor import CUT_SPEED_PRESETS
+
+            cut_speed = st.select_slider(
+                "컷 속도",
+                options=list(CUT_SPEED_PRESETS.keys()),
+                value="보통",
+                label_visibility="collapsed",
+            )
+            max_cut_sec = CUT_SPEED_PRESETS[cut_speed]
+            st.caption(
+                f"한 컷을 최대 **{max_cut_sec:.1f}초**까지만 보여 주고 화면을 바꿉니다. "
+                "자막 한 줄이 이보다 길면 그 줄 안에서도 화면이 한 번 더 바뀝니다."
+            )
+
             # ── 장면 매칭 방식 ─────────────────────
             st.markdown("**🎯 장면 고르는 방식**")
             smart_match = st.checkbox(
                 "자막 내용에 맞는 장면을 AI가 골라 배치 (권장)",
                 value=True,
-                help="끄면 장면을 순서대로만 배치합니다",
+                help="끄면 안 쓴 장면부터 돌려가며 자동 배치합니다",
             )
             if smart_match:
-                if anthropic_key:
+                if ai_provider == "gemini" and gemini_keys:
                     st.caption(
-                        "각 장면을 Claude가 보고 자막 내용과 맞는 화면을 고릅니다. "
+                        "각 장면을 **Gemini(무료)** 가 보고 자막 내용과 맞는 화면을 고릅니다."
+                    )
+                elif anthropic_key:
+                    st.caption(
+                        "각 장면을 **Claude** 가 보고 자막 내용과 맞는 화면을 고릅니다. "
                         "(Anthropic 크레딧이 조금 듭니다)"
                     )
                 else:
                     st.warning(
-                        "⚠️ 똑똑한 장면 매칭은 **Anthropic(Claude) 키**가 있어야 합니다. "
-                        "키가 없어서 장면을 순서대로 배치합니다. "
-                        "(분석·대본은 Gemini 무료로 그대로 됩니다)"
+                        "⚠️ 사이드바에 **Gemini 키**(무료) 나 **Anthropic 키**를 넣어야 "
+                        "내용에 맞는 장면을 골라 줍니다. 지금은 안 쓴 장면부터 "
+                        "돌려가며 자동 배치합니다."
                     )
             else:
-                st.caption("장면을 순서대로 배치합니다. 내용과 화면이 안 맞을 수 있습니다.")
+                st.caption(
+                    "안 쓴 장면부터 돌려가며 자동 배치합니다. "
+                    "화면은 계속 바뀌지만 내용과 안 맞을 수 있습니다."
+                )
 
             # ── 무엇으로 만들지 자동 판정 ──────────
             n_vid = len(cut_local_paths) + len(cut_urls)
@@ -2073,6 +2098,9 @@ if _active == 4:
                                 image_paths=use_imgs,
                                 image_every=img_every,
                                 anthropic_key=anthropic_key,
+                                provider=ai_provider,
+                                gemini_key=gemini_keys,
+                                max_cut_sec=max_cut_sec,
                                 smart_match=smart_match,
                                 delogo_boxes=st.session_state.get('delogo_boxes'),
                                 progress_cb=_prog,
@@ -2081,6 +2109,11 @@ if _active == 4:
                             st.session_state['video_path'] = result['video_path']
                             st.session_state['cut_plan'] = result['plan']
                             st.session_state['cut_ai_matched'] = result.get('ai_matched', False)
+                            st.session_state['cut_info'] = {
+                                'sub_count': result.get('sub_count', 0),
+                                'max_cut_sec': result.get('max_cut_sec', 0),
+                                'scene_count': result.get('scene_count', 0),
+                            }
                             st.session_state['step'] = 5
                             st.rerun()
                         except Exception as e:
@@ -2179,19 +2212,27 @@ if _active == 4:
             if cut_plan:
                 st.markdown("---")
                 _ai = st.session_state.get('cut_ai_matched')
-                _label = "🎯 AI가 자막에 맞춰 배치" if _ai else "↔️ 순서대로 배치"
-                with st.expander(f"✂️ 컷 구성 보기 ({len(cut_plan)}개 클립 · {_label})"):
+                _ci = st.session_state.get('cut_info', {})
+                _label = "🎯 AI가 자막에 맞춰 배치" if _ai else "🔀 안 쓴 장면부터 자동 배치"
+                with st.expander(f"✂️ 컷 구성 보기 ({len(cut_plan)}개 컷 · {_label})"):
+                    if _ci.get('sub_count'):
+                        st.caption(
+                            f"대본 {_ci['sub_count']}줄 → 컷 {len(cut_plan)}개 "
+                            f"(한 컷 최대 {_ci.get('max_cut_sec', 0):.1f}초, "
+                            f"쓸 수 있는 장면 {_ci.get('scene_count', 0)}개)"
+                        )
                     if not _ai:
                         st.caption(
-                            "AI 매칭이 적용되지 않았습니다 "
-                            "(크레딧 부족이거나 옵션을 끈 경우). 내용과 화면이 안 맞을 수 있습니다."
+                            "⚠️ AI 장면 매칭은 안 됐습니다 (키가 없거나 한도 초과, 또는 옵션을 끈 경우). "
+                            "화면은 계속 바뀌지만 내용과 안 맞을 수 있습니다."
                         )
                     rows = []
                     _t = 0.0
-                    for c in cut_plan:
+                    for _ci_n, c in enumerate(cut_plan, 1):
                         is_img = c.get('type') == 'image'
                         rows.append({
-                            "순서": c['sub_index'],
+                            "컷": _ci_n,
+                            "대본 줄": c['sub_index'],
                             "위치": f"{_t:.1f}s",
                             "종류": "🖼️ 이미지" if is_img else "🎬 영상",
                             "출처": os.path.basename(c['src']),
